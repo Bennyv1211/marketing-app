@@ -1,0 +1,131 @@
+{
+  "theme": "LIGHT",
+  "archetype": "Archetype 1 (Organic & Earthy) blended with soft tactile elements for approachability",
+  "design_philosophy": "Simple, friendly, clear, not overwhelming. Warm, modern, clean, soft shadows, rounded cards, high readability, comforting not intimidating. Large touch targets, minimal settings, no jargon.",
+  "typography": {
+    "fonts": {
+      "headings": "Nunito, rounded humanist sans for friendly approachability",
+      "body": "DM Sans or Work Sans, clean sans for optimal readability"
+    },
+    "hierarchy": {
+      "h1": "text-3xl sm:text-4xl font-bold tracking-tight text-slate-900",
+      "h2": "text-2xl sm:text-3xl font-bold tracking-tight text-slate-800",
+      "h3": "text-xl font-semibold text-slate-800",
+      "h4": "text-lg font-semibold text-slate-700",
+      "body": "text-base leading-relaxed text-slate-600",
+      "small": "text-sm text-slate-500",
+      "button_label": "text-lg font-bold"
+    },
+    "alignment": "Left-align paragraphs, inputs, labels. Center-align hero text or success states."
+  },
+  "colors": {
+    "background": {
+      "page": "#FDFBF7",
+      "card": "#FFFFFF"
+    },
+    "primary": {
+      "DEFAULT": "#E07A5F",
+      "hover": "#D56A4F",
+      "foreground": "#FFFFFF",
+      "light": "#F9EAE6"
+    },
+    "secondary": {
+      "DEFAULT": "#81B29A",
+      "hover": "#70A189",
+      "foreground": "#FFFFFF"
+    },
+    "neutral": {
+      "900": "#1C1C1C",
+      "800": "#2D3748",
+      "600": "#4A5568",
+      "400": "#CBD5E0",
+      "200": "#EDF2F7",
+      "100": "#F7FAFC"
+    },
+    "accent": {
+      "DEFAULT": "#F2CC8F",
+      "foreground": "#1C1C1C"
+    },
+    "prohibited": ["#9D4CDD", "#1B93A4", "#7351B7", "purple gradients", "neon colors"]
+  },
+  "spacing_and_layout": {
+    "container": "max-w-md mx-auto min-h-screen flex flex-col bg-[#FDFBF7] shadow-[0_0_40px_rgba(0,0,0,0.05)] md:rounded-3xl md:h-[90vh] md:my-[5vh] md:overflow-hidden relative",
+    "padding": "p-6 md:p-8",
+    "touch_targets": "min-h-[56px] min-w-[56px]",
+    "card_spacing": "gap-4 md:gap-6",
+    "general_rules": [
+      "Mobile-first constraint for web layout.",
+      "Fixed bottom action bar for primary wizard actions.",
+      "Generous spacing between sections (my-8 or my-12)."
+    ]
+  },
+  "components": {
+    "buttons": {
+      "primary": "w-full min-h-[56px] rounded-2xl bg-primary text-white text-lg font-bold hover:bg-primary-hover active:scale-[0.98] transition-all flex items-center justify-center shadow-sm hover:shadow",
+      "secondary": "w-full min-h-[56px] rounded-2xl bg-white border-2 border-slate-200 text-slate-700 text-lg font-bold hover:bg-slate-50 active:scale-[0.98] transition-all flex items-center justify-center",
+      "suggestion_chip": "px-5 py-3 rounded-full bg-primary-light text-primary font-semibold text-sm hover:bg-primary/20 transition-colors border border-transparent hover:border-primary/30"
+    },
+    "cards": {
+      "base": "bg-white rounded-3xl p-5 shadow-[0_4px_24px_rgba(0,0,0,0.04)] border border-slate-100",
+      "interactive": "bg-white rounded-3xl p-5 shadow-sm border-2 border-transparent hover:border-primary/30 cursor-pointer transition-all active:scale-[0.98]",
+      "selected": "bg-primary-light/30 rounded-3xl p-5 border-2 border-primary ring-4 ring-primary/10"
+    },
+    "inputs": {
+      "text": "w-full min-h-[56px] rounded-2xl border-2 border-slate-200 bg-slate-50 px-4 py-3 text-base text-slate-800 focus:outline-none focus:border-primary focus:bg-white focus:ring-4 focus:ring-primary/10 transition-all placeholder:text-slate-400"
+    },
+    "progress_indicator": {
+      "bar": "h-2 w-full bg-slate-100 rounded-full overflow-hidden",
+      "fill": "h-full bg-primary rounded-full transition-all duration-500 ease-out"
+    }
+  },
+  "motion_and_interaction": {
+    "hover": "Subtle lifts (-translate-y-0.5) and soft shadow increases.",
+    "active": "Tactile press effect (scale-[0.98]).",
+    "page_transition": "Smooth fade-in and slide-up (translate-y-4 to 0).",
+    "wizard_steps": "Horizontal slide or crossfade between steps."
+  },
+  "media": {
+    "rules": "Use warm, professional, authentic photography. No generic graphics. Maintain organic feel.",
+    "images": {
+      "onboarding_hero": {
+        "url": "https://images.unsplash.com/photo-1753351052046-8c6818304a4f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NDh8MHwxfHNlYXJjaHwxfHxjb2ZmZWUlMjBzaG9wJTIwb3duZXIlMjBzbWlsaW5nfGVufDB8fHx8MTc3Njk1MjM2NHww&ixlib=rb-4.1.0&q=85",
+        "alt": "Friendly local business owners",
+        "usage": "Welcome/Landing screen background or hero"
+      },
+      "sample_upload": {
+        "url": "https://images.unsplash.com/photo-1501721358449-1505ca840822?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NTYxODh8MHwxfHNlYXJjaHwyfHxmcmVzaGx5JTIwYmFrZWQlMjBjcm9pc3NhbnQlMjB3b29kZW4lMjB0YWJsZXxlbnwwfHx8fDE3NzY5NTIzNjV8MA&ixlib=rb-4.1.0&q=85",
+        "alt": "Freshly baked pastry on plate",
+        "usage": "Example of an uploaded product photo"
+      },
+      "generated_ad_1": {
+        "url": "https://images.pexels.com/photos/7440414/pexels-photo-7440414.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "alt": "Professional croissant photo",
+        "usage": "Option A in the image generation step"
+      },
+      "generated_ad_2": {
+        "url": "https://images.pexels.com/photos/32459232/pexels-photo-32459232.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "alt": "Stylish iced coffee",
+        "usage": "Option B in the image generation step"
+      },
+      "generated_ad_3": {
+        "url": "https://images.pexels.com/photos/11551934/pexels-photo-11551934.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+        "alt": "Delicious croissant with coffee mug",
+        "usage": "Option C in the image generation step"
+      }
+    }
+  },
+  "accessibility_and_testing": {
+    "contrast": "Ensure all text against buttons or primary backgrounds meets WCAG AA 4.5:1 minimum.",
+    "touch": "All interactive elements MUST be at least 44x44px (using min-h-[56px] as standard).",
+    "testing_attributes": "All interactive elements MUST include data-testid. Examples: data-testid='login-button', data-testid='upload-photo-btn', data-testid='publish-instagram-toggle'."
+  },
+  "instructions_to_main_agent": [
+    "Design specifically for a mobile layout (max-w-md mx-auto) mimicking a React Native Expo experience on the web.",
+    "Use Lucide-react for simple, friendly icons.",
+    "Prioritize large, legible text (Nunito + DM Sans/Work Sans).",
+    "Do NOT use raw HTML inputs/selects; use heavily customized Shadcn components matching the organic soft theme.",
+    "Ensure bottom action buttons are fixed/sticky at the bottom of the viewport for easy thumb reach.",
+    "Use plain, friendly English in all states (empty, loading, error). Avoid technical jargon.",
+    "Avoid any purple/violet AI-themed gradients. Keep colors warm, inviting, and comforting."
+  ]
+}
