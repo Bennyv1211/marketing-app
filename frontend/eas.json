@@ -1,0 +1,32 @@
+{
+  "cli": {
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://marketing-app-backend-xvhi.onrender.com"
+      }
+    },
+    "production": {
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://marketing-app-backend-xvhi.onrender.com"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
