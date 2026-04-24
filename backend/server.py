@@ -30,6 +30,7 @@ JWT_ALG = os.environ.get("JWT_ALGORITHM", "HS256")
 JWT_EXPIRE_HOURS = int(os.environ.get("JWT_EXPIRE_HOURS", "168"))
 KIE_API_KEY = os.environ.get("KIE_API_KEY", "")
 KIE_API_BASE_URL = os.environ.get("KIE_API_BASE_URL", "https://api.kie.ai").rstrip("/")
+KIE_UPLOAD_BASE_URL = os.environ.get("KIE_UPLOAD_BASE_URL", "https://kieai.redpandaai.co").rstrip("/")
 KIE_IMAGE_MODEL = os.environ.get("KIE_IMAGE_MODEL", "nano-banana-2")
 KIE_IMAGE_RESOLUTION = os.environ.get("KIE_IMAGE_RESOLUTION", "4K")
 KIE_IMAGE_FORMAT = os.environ.get("KIE_IMAGE_FORMAT", "png")
@@ -165,11 +166,12 @@ def _extract_kie_error(payload: dict | None) -> str | None:
 
 async def _create_kie_image_task(prompt: str, image_b64: str, mime_type: str) -> str:
     require_config(KIE_API_KEY, "KIE_API_KEY")
+    source_image_url = await _upload_kie_base64_image(image_b64, mime_type)
     payload = {
         "model": KIE_IMAGE_MODEL,
         "input": {
             "prompt": prompt,
-            "image_input": [f"data:{mime_type};base64,{image_b64}"],
+            "image_input": [source_image_url],
             "aspect_ratio": KIE_IMAGE_ASPECT_RATIO,
             "resolution": KIE_IMAGE_RESOLUTION,
             "output_format": KIE_IMAGE_FORMAT,
@@ -191,6 +193,33 @@ async def _create_kie_image_task(prompt: str, image_b64: str, mime_type: str) ->
             detail=f"Image provider did not return a task ID. Response: {json.dumps(data)[:500]}",
         )
     return task_id
+
+
+async def _upload_kie_base64_image(image_b64: str, mime_type: str) -> str:
+    require_config(KIE_API_KEY, "KIE_API_KEY")
+    extension = mimetypes.guess_extension(mime_type or "") or ".png"
+    upload_payload = {
+        "base64Data": f"data:{mime_type};base64,{image_b64}",
+        "uploadPath": "images/autosocial",
+        "fileName": f"upload-{uuid.uuid4().hex}{extension}",
+    }
+    data = await _post_json(
+        f"{KIE_UPLOAD_BASE_URL}/api/file-base64-upload",
+        headers={
+            "Authorization": f"Bearer {KIE_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        payload=upload_payload,
+        timeout=60,
+    )
+    file_data = (data or {}).get("data") or {}
+    download_url = file_data.get("downloadUrl") or file_data.get("fileUrl")
+    if not download_url:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Image upload provider did not return a file URL. Response: {json.dumps(data)[:500]}",
+        )
+    return download_url
 
 
 async def _wait_for_kie_image(task_id: str) -> tuple[str, str]:
