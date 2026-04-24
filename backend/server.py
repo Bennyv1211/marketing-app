@@ -12,6 +12,7 @@ from typing import Optional, Literal
 import jwt
 import bcrypt
 import requests
+import boto3
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
@@ -32,7 +33,7 @@ KIE_API_KEY = os.environ.get("KIE_API_KEY", "")
 KIE_API_BASE_URL = os.environ.get("KIE_API_BASE_URL", "https://api.kie.ai").rstrip("/")
 KIE_UPLOAD_BASE_URL = os.environ.get("KIE_UPLOAD_BASE_URL", "https://kieai.redpandaai.co").rstrip("/")
 KIE_IMAGE_MODEL = os.environ.get("KIE_IMAGE_MODEL", "nano-banana-2")
-KIE_IMAGE_RESOLUTION = os.environ.get("KIE_IMAGE_RESOLUTION", "4K")
+KIE_IMAGE_RESOLUTION = os.environ.get("KIE_IMAGE_RESOLUTION", "1K")
 KIE_IMAGE_FORMAT = os.environ.get("KIE_IMAGE_FORMAT", "png")
 KIE_IMAGE_ASPECT_RATIO = os.environ.get("KIE_IMAGE_ASPECT_RATIO", "auto")
 KIE_POLL_INTERVAL_SECONDS = float(os.environ.get("KIE_POLL_INTERVAL_SECONDS", "2.5"))
@@ -40,6 +41,16 @@ KIE_POLL_TIMEOUT_SECONDS = int(os.environ.get("KIE_POLL_TIMEOUT_SECONDS", "180")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_API_BASE_URL = os.environ.get("OPENAI_API_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 OPENAI_CAPTION_MODEL = os.environ.get("OPENAI_CAPTION_MODEL", "gpt-5.2")
+R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "")
+R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
+R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
+R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "")
+R2_PRESIGNED_URL_EXPIRE_SECONDS = int(os.environ.get("R2_PRESIGNED_URL_EXPIRE_SECONDS", "86400"))
+R2_ENDPOINT_URL = (
+    f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com".rstrip("/")
+    if R2_ACCOUNT_ID
+    else ""
+)
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -67,6 +78,72 @@ def require_config(value: str, name: str):
             detail=f"{name} is not configured on the server yet.",
         )
     return value
+
+
+def _r2_client():
+    require_config(R2_ACCOUNT_ID, "R2_ACCOUNT_ID")
+    require_config(R2_ACCESS_KEY_ID, "R2_ACCESS_KEY_ID")
+    require_config(R2_SECRET_ACCESS_KEY, "R2_SECRET_ACCESS_KEY")
+    require_config(R2_BUCKET_NAME, "R2_BUCKET_NAME")
+    return boto3.client(
+        "s3",
+        endpoint_url=R2_ENDPOINT_URL,
+        aws_access_key_id=R2_ACCESS_KEY_ID,
+        aws_secret_access_key=R2_SECRET_ACCESS_KEY,
+        region_name="auto",
+    )
+
+
+async def _upload_bytes_to_r2(content: bytes, key: str, mime_type: str) -> dict:
+    def _do_upload():
+        client = _r2_client()
+        client.put_object(
+            Bucket=R2_BUCKET_NAME,
+            Key=key,
+            Body=content,
+            ContentType=mime_type,
+        )
+        url = client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": R2_BUCKET_NAME, "Key": key},
+            ExpiresIn=R2_PRESIGNED_URL_EXPIRE_SECONDS,
+        )
+        return {"key": key, "url": url}
+
+    try:
+        return await asyncio.to_thread(_do_upload)
+    except Exception as exc:
+        logger.exception("R2 upload failed")
+        raise HTTPException(status_code=502, detail=f"Image storage error: {exc}") from exc
+
+
+async def _read_bytes_from_r2(key: str) -> bytes:
+    def _do_read():
+        client = _r2_client()
+        obj = client.get_object(Bucket=R2_BUCKET_NAME, Key=key)
+        return obj["Body"].read()
+
+    try:
+        return await asyncio.to_thread(_do_read)
+    except Exception as exc:
+        logger.exception("R2 read failed")
+        raise HTTPException(status_code=502, detail=f"Image storage read error: {exc}") from exc
+
+
+async def _signed_r2_url(key: str) -> str:
+    def _do_sign():
+        client = _r2_client()
+        return client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": R2_BUCKET_NAME, "Key": key},
+            ExpiresIn=R2_PRESIGNED_URL_EXPIRE_SECONDS,
+        )
+
+    try:
+        return await asyncio.to_thread(_do_sign)
+    except Exception as exc:
+        logger.exception("R2 URL signing failed")
+        raise HTTPException(status_code=502, detail=f"Image storage URL error: {exc}") from exc
 
 
 def _raise_for_provider_error(resp: requests.Response, provider: str):
@@ -535,18 +612,21 @@ async def upload_image(data: UploadIn, user=Depends(get_current_user)):
     if len(data.image_base64) > 12_000_000:
         raise HTTPException(status_code=413, detail="Image is too large. Please use a smaller photo.")
     upload_id = str(uuid.uuid4())
+    image_bytes = base64.b64decode(data.image_base64)
+    upload_key = f"uploads/{user['id']}/{upload_id}.{(mimetypes.guess_extension(data.mime_type) or '.jpg').lstrip('.')}"
+    stored = await _upload_bytes_to_r2(image_bytes, upload_key, data.mime_type)
     doc = {
         "id": upload_id,
         "user_id": user["id"],
         "mime_type": data.mime_type,
-        "image_base64": data.image_base64,
+        "storage_key": stored["key"],
         "created_at": now_iso(),
     }
     await db.uploaded_images.insert_one(doc.copy())
     return {
         "id": upload_id,
         "mime_type": data.mime_type,
-        "data_uri": f"data:{data.mime_type};base64,{data.image_base64}",
+        "data_uri": stored["url"],
         "created_at": doc["created_at"],
     }
 
@@ -609,6 +689,8 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
     upload = await db.uploaded_images.find_one({"id": data.uploaded_image_id, "user_id": user["id"]})
     if not upload:
         raise HTTPException(status_code=404, detail="Uploaded image not found")
+    upload_bytes = await _read_bytes_from_r2(upload["storage_key"])
+    upload_b64 = base64.b64encode(upload_bytes).decode("utf-8")
 
     # Enforce daily rate limit (per user, UTC day) BEFORE spending AI credits
     used_today = await _count_today_requests(user["id"])
@@ -631,7 +713,7 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
     # Generate 3 variations in parallel
     tasks = [
         _generate_single_ad_image(
-            upload["image_base64"], upload["mime_type"],
+            upload_b64, upload["mime_type"],
             data.prompt, data.tone or "friendly", data.post_goal or "general brand post",
             AD_STYLE_VARIATIONS[i], i,
         )
@@ -644,12 +726,15 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
         if res is None:
             continue
         gen_id = str(uuid.uuid4())
+        generated_key = f"generated/{user['id']}/{gen_id}.{(mimetypes.guess_extension(res['mime_type']) or '.png').lstrip('.')}"
+        generated_bytes = base64.b64decode(res["data"])
+        stored = await _upload_bytes_to_r2(generated_bytes, generated_key, res["mime_type"])
         doc = {
             "id": gen_id,
             "uploaded_image_id": data.uploaded_image_id,
             "user_id": user["id"],
-            "image_base64": res["data"],
             "mime_type": res["mime_type"],
+            "storage_key": stored["key"],
             "generation_prompt": data.prompt,
             "variation_index": i,
             "style_name": ["Warm lifestyle", "Bold minimal", "Vibrant flat-lay"][i],
@@ -661,7 +746,7 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
             "id": gen_id,
             "variation_index": i,
             "style_name": doc["style_name"],
-            "data_uri": f"data:{res['mime_type']};base64,{res['data']}",
+            "data_uri": stored["url"],
         })
 
     if not generated:
@@ -725,6 +810,8 @@ async def generate_captions(data: GenerateCaptionsIn, user=Depends(get_current_u
     gen_img = await db.generated_images.find_one({"id": data.generated_image_id, "user_id": user["id"]})
     if not gen_img:
         raise HTTPException(status_code=404, detail="Generated image not found")
+    gen_img_bytes = await _read_bytes_from_r2(gen_img["storage_key"])
+    gen_img_b64 = base64.b64encode(gen_img_bytes).decode("utf-8")
     business = await db.businesses.find_one({"user_id": user["id"]}, {"_id": 0}) or {}
     biz_name = business.get("business_name", "our business")
     biz_type = business.get("business_type", "local shop")
@@ -764,7 +851,7 @@ Return ONLY valid JSON in this shape (no markdown, no backticks):
     try:
         parsed = await _generate_openai_caption_json(
             prompt,
-            gen_img["image_base64"],
+            gen_img_b64,
             gen_img.get("mime_type", "image/png"),
         )
     except Exception:
@@ -900,7 +987,7 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
 async def _hydrate_post(post: dict) -> dict:
     gi = await db.generated_images.find_one(
         {"id": post["generated_image_id"]},
-        {"_id": 0, "image_base64": 1, "mime_type": 1, "style_name": 1},
+        {"_id": 0, "storage_key": 1, "mime_type": 1, "style_name": 1},
     )
     gc = await db.generated_captions.find_one(
         {"id": post["generated_caption_id"]},
@@ -914,7 +1001,7 @@ async def _hydrate_post(post: dict) -> dict:
     out = dict(post)
     out.pop("_id", None)
     if gi:
-        out["image_data_uri"] = f"data:{gi.get('mime_type','image/png')};base64,{gi['image_base64']}"
+        out["image_data_uri"] = await _signed_r2_url(gi["storage_key"])
         out["image_style"] = gi.get("style_name")
     if gc:
         out["caption_text"] = gc.get("caption_text", "")
