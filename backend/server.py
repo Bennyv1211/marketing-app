@@ -41,6 +41,10 @@ KIE_POLL_TIMEOUT_SECONDS = int(os.environ.get("KIE_POLL_TIMEOUT_SECONDS", "180")
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 OPENAI_API_BASE_URL = os.environ.get("OPENAI_API_BASE_URL", "https://api.openai.com/v1").rstrip("/")
 OPENAI_CAPTION_MODEL = os.environ.get("OPENAI_CAPTION_MODEL", "gpt-5.2")
+OPENAI_IMAGE_MODEL = os.environ.get("OPENAI_IMAGE_MODEL", "gpt-image-1")
+OPENAI_IMAGE_QUALITY = os.environ.get("OPENAI_IMAGE_QUALITY", "low")
+OPENAI_IMAGE_SIZE = os.environ.get("OPENAI_IMAGE_SIZE", "1024x1024")
+OPENAI_IMAGE_VARIATIONS = int(os.environ.get("OPENAI_IMAGE_VARIATIONS", "1"))
 R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "")
 R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
@@ -225,6 +229,14 @@ async def _get_json(url: str, *, headers: dict, timeout: int = 60) -> dict:
         return _raise_for_provider_error(resp, "Upstream API")
 
     return await asyncio.to_thread(_do_get)
+
+
+async def _post_multipart(url: str, *, headers: dict, data: dict, files: list[tuple[str, tuple]], timeout: int = 120) -> dict:
+    def _do_post():
+        resp = requests.post(url, headers=headers, data=data, files=files, timeout=timeout)
+        return _raise_for_provider_error(resp, "Upstream API")
+
+    return await asyncio.to_thread(_do_post)
 
 
 async def _get_binary(url: str, *, timeout: int = 120) -> tuple[bytes, str]:
@@ -703,7 +715,7 @@ AD_STYLE_VARIATIONS = [
 
 async def _generate_single_ad_image(image_b64: str, mime_type: str, prompt: str, tone: str,
                                      post_goal: str, variation_text: str, idx: int) -> Optional[dict]:
-    """Call Nano Banana 2 and return {data, mime_type} or None."""
+    """Call OpenAI image edit and return {data, mime_type} or None."""
     system_msg = (
         "You are a professional product photographer and ad art director. "
         "When given a reference product photo, you redesign the scene for a social-media ad "
@@ -724,9 +736,37 @@ async def _generate_single_ad_image(image_b64: str, mime_type: str, prompt: str,
         f"- No watermarks"
     )
     try:
-        task_id = await _create_kie_image_task(f"{system_msg}\n\n{full_prompt}", image_b64, mime_type)
-        image_data, output_mime = await _wait_for_kie_image(task_id)
-        return {"data": image_data, "mime_type": output_mime}
+        require_config(OPENAI_API_KEY, "OPENAI_API_KEY")
+        image_bytes = base64.b64decode(image_b64)
+        extension = mimetypes.guess_extension(mime_type or "") or ".png"
+        response = await _post_multipart(
+            f"{OPENAI_API_BASE_URL}/images/edits",
+            headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+            data={
+                "model": OPENAI_IMAGE_MODEL,
+                "prompt": f"{system_msg}\n\n{full_prompt}",
+                "size": OPENAI_IMAGE_SIZE,
+                "quality": OPENAI_IMAGE_QUALITY,
+                "n": "1",
+            },
+            files=[
+                (
+                    "image[]",
+                    (f"source{extension}", image_bytes, mime_type or "image/png"),
+                )
+            ],
+            timeout=180,
+        )
+        image_data = None
+        if isinstance(response, dict):
+            for item in response.get("data", []):
+                b64_json = item.get("b64_json")
+                if isinstance(b64_json, str) and b64_json.strip():
+                    image_data = b64_json
+                    break
+        if not image_data:
+            raise HTTPException(status_code=502, detail="OpenAI image provider did not return image data.")
+        return {"data": image_data, "mime_type": "image/png"}
     except Exception as e:
         logger.exception(f"Image gen variation {idx} failed: {e}")
     return None
@@ -758,14 +798,16 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
     }
     await db.generation_requests.insert_one(req_doc.copy())
 
-    # Generate 3 variations in parallel
+    variation_count = max(1, min(OPENAI_IMAGE_VARIATIONS, len(AD_STYLE_VARIATIONS)))
+
+    # Generate configured variations in parallel
     tasks = [
         _generate_single_ad_image(
             upload_b64, upload_mime_type,
             data.prompt, data.tone or "friendly", data.post_goal or "general brand post",
             AD_STYLE_VARIATIONS[i], i,
         )
-        for i in range(3)
+        for i in range(variation_count)
     ]
     results = await asyncio.gather(*tasks, return_exceptions=False)
 
