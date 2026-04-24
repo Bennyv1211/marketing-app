@@ -146,6 +146,54 @@ async def _signed_r2_url(key: str) -> str:
         raise HTTPException(status_code=502, detail=f"Image storage URL error: {exc}") from exc
 
 
+async def _ensure_uploaded_image_in_r2(upload_doc: dict) -> tuple[bytes, str]:
+    mime_type = upload_doc.get("mime_type", "image/jpeg")
+    storage_key = upload_doc.get("storage_key")
+    if storage_key:
+        return await _read_bytes_from_r2(storage_key), mime_type
+
+    legacy_b64 = upload_doc.get("image_base64")
+    if not legacy_b64:
+        raise HTTPException(status_code=500, detail="Uploaded image is missing stored content.")
+
+    image_bytes = base64.b64decode(legacy_b64)
+    upload_id = upload_doc.get("id", str(uuid.uuid4()))
+    user_id = upload_doc.get("user_id", "legacy")
+    key = f"uploads/{user_id}/{upload_id}.{(mimetypes.guess_extension(mime_type) or '.jpg').lstrip('.')}"
+    stored = await _upload_bytes_to_r2(image_bytes, key, mime_type)
+    await db.uploaded_images.update_one(
+        {"id": upload_doc["id"]},
+        {"$set": {"storage_key": stored["key"]}, "$unset": {"image_base64": ""}},
+    )
+    upload_doc["storage_key"] = stored["key"]
+    upload_doc.pop("image_base64", None)
+    return image_bytes, mime_type
+
+
+async def _ensure_generated_image_in_r2(generated_doc: dict) -> tuple[bytes, str]:
+    mime_type = generated_doc.get("mime_type", "image/png")
+    storage_key = generated_doc.get("storage_key")
+    if storage_key:
+        return await _read_bytes_from_r2(storage_key), mime_type
+
+    legacy_b64 = generated_doc.get("image_base64")
+    if not legacy_b64:
+        raise HTTPException(status_code=500, detail="Generated image is missing stored content.")
+
+    image_bytes = base64.b64decode(legacy_b64)
+    image_id = generated_doc.get("id", str(uuid.uuid4()))
+    user_id = generated_doc.get("user_id", "legacy")
+    key = f"generated/{user_id}/{image_id}.{(mimetypes.guess_extension(mime_type) or '.png').lstrip('.')}"
+    stored = await _upload_bytes_to_r2(image_bytes, key, mime_type)
+    await db.generated_images.update_one(
+        {"id": generated_doc["id"]},
+        {"$set": {"storage_key": stored["key"]}, "$unset": {"image_base64": ""}},
+    )
+    generated_doc["storage_key"] = stored["key"]
+    generated_doc.pop("image_base64", None)
+    return image_bytes, mime_type
+
+
 def _raise_for_provider_error(resp: requests.Response, provider: str):
     try:
         payload = resp.json()
@@ -689,7 +737,7 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
     upload = await db.uploaded_images.find_one({"id": data.uploaded_image_id, "user_id": user["id"]})
     if not upload:
         raise HTTPException(status_code=404, detail="Uploaded image not found")
-    upload_bytes = await _read_bytes_from_r2(upload["storage_key"])
+    upload_bytes, upload_mime_type = await _ensure_uploaded_image_in_r2(upload)
     upload_b64 = base64.b64encode(upload_bytes).decode("utf-8")
 
     # Enforce daily rate limit (per user, UTC day) BEFORE spending AI credits
@@ -713,7 +761,7 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
     # Generate 3 variations in parallel
     tasks = [
         _generate_single_ad_image(
-            upload_b64, upload["mime_type"],
+            upload_b64, upload_mime_type,
             data.prompt, data.tone or "friendly", data.post_goal or "general brand post",
             AD_STYLE_VARIATIONS[i], i,
         )
@@ -810,7 +858,7 @@ async def generate_captions(data: GenerateCaptionsIn, user=Depends(get_current_u
     gen_img = await db.generated_images.find_one({"id": data.generated_image_id, "user_id": user["id"]})
     if not gen_img:
         raise HTTPException(status_code=404, detail="Generated image not found")
-    gen_img_bytes = await _read_bytes_from_r2(gen_img["storage_key"])
+    gen_img_bytes, gen_img_mime_type = await _ensure_generated_image_in_r2(gen_img)
     gen_img_b64 = base64.b64encode(gen_img_bytes).decode("utf-8")
     business = await db.businesses.find_one({"user_id": user["id"]}, {"_id": 0}) or {}
     biz_name = business.get("business_name", "our business")
@@ -852,7 +900,7 @@ Return ONLY valid JSON in this shape (no markdown, no backticks):
         parsed = await _generate_openai_caption_json(
             prompt,
             gen_img_b64,
-            gen_img.get("mime_type", "image/png"),
+            gen_img_mime_type,
         )
     except Exception:
         logger.exception("Caption gen failed")
@@ -987,7 +1035,7 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
 async def _hydrate_post(post: dict) -> dict:
     gi = await db.generated_images.find_one(
         {"id": post["generated_image_id"]},
-        {"_id": 0, "storage_key": 1, "mime_type": 1, "style_name": 1},
+        {"_id": 0, "storage_key": 1, "image_base64": 1, "mime_type": 1, "style_name": 1, "user_id": 1, "id": 1},
     )
     gc = await db.generated_captions.find_one(
         {"id": post["generated_caption_id"]},
@@ -1001,6 +1049,7 @@ async def _hydrate_post(post: dict) -> dict:
     out = dict(post)
     out.pop("_id", None)
     if gi:
+        await _ensure_generated_image_in_r2(gi)
         out["image_data_uri"] = await _signed_r2_url(gi["storage_key"])
         out["image_style"] = gi.get("style_name")
     if gc:
