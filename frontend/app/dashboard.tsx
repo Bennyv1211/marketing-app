@@ -151,6 +151,7 @@ function PostCard({ post, onPress }: { post: any; onPress: () => void }) {
   const platforms: string[] = [];
   if (post.instagram_enabled) platforms.push("Instagram");
   if (post.facebook_enabled) platforms.push("Facebook");
+  if (post.tiktok_enabled) platforms.push("TikTok");
   return (
     <TouchableOpacity activeOpacity={0.9} onPress={onPress} style={styles.postCard} testID={`post-${post.id}`}>
       {post.image_data_uri ? (

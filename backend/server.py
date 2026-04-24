@@ -292,7 +292,7 @@ class BusinessIn(BaseModel):
 
 
 class SocialConnectIn(BaseModel):
-    platform: Literal["instagram", "facebook"]
+    platform: Literal["instagram", "facebook", "tiktok"]
     account_name: str
 
 
@@ -320,6 +320,7 @@ class CreatePostIn(BaseModel):
     generated_caption_id: str
     instagram_enabled: bool = True
     facebook_enabled: bool = False
+    tiktok_enabled: bool = False
     schedule_for: Optional[str] = None  # ISO string; None = now
 
 
@@ -750,7 +751,7 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
     if not gen_img or not gen_cap:
         raise HTTPException(status_code=404, detail="Selected image or caption not found.")
 
-    if not (data.instagram_enabled or data.facebook_enabled):
+    if not (data.instagram_enabled or data.facebook_enabled or data.tiktok_enabled):
         raise HTTPException(status_code=400, detail="Please choose at least one platform to publish to.")
 
     connections = await db.social_connections.find({"user_id": user["id"]}, {"_id": 0}).to_list(10)
@@ -769,6 +770,7 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
     import random
     ig_post_id = f"mock_ig_{uuid.uuid4().hex[:10]}" if data.instagram_enabled and not scheduled else None
     fb_post_id = f"mock_fb_{uuid.uuid4().hex[:10]}" if data.facebook_enabled and not scheduled else None
+    tt_post_id = f"mock_tt_{uuid.uuid4().hex[:10]}" if data.tiktok_enabled and not scheduled else None
 
     # If platform toggled on but not connected → warn by marking failed for that platform (MVP: still succeed)
     warnings = []
@@ -784,11 +786,13 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
         "generated_caption_id": gen_cap["id"],
         "instagram_enabled": data.instagram_enabled,
         "facebook_enabled": data.facebook_enabled,
+        "tiktok_enabled": data.tiktok_enabled,
         "publish_status": publish_status,
         "published_at": published_at,
         "scheduled_for": scheduled,
         "instagram_post_id": ig_post_id,
         "facebook_post_id": fb_post_id,
+        "tiktok_post_id": tt_post_id,
         "created_at": now,
         "warnings": warnings,
     }
@@ -796,7 +800,11 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
 
     # Seed mock metrics if published now
     if publish_status == "published":
-        for platform in (["instagram"] if data.instagram_enabled else []) + (["facebook"] if data.facebook_enabled else []):
+        for platform in (
+            (["instagram"] if data.instagram_enabled else [])
+            + (["facebook"] if data.facebook_enabled else [])
+            + (["tiktok"] if data.tiktok_enabled else [])
+        ):
             metric = {
                 "id": str(uuid.uuid4()),
                 "post_id": post_id,

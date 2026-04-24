@@ -8,12 +8,13 @@ import { theme } from "../lib/theme";
 import { api } from "../lib/api";
 
 type Conn = { platform: string; account_name: string; status: string };
+type ConnectPlatform = "instagram" | "facebook" | "tiktok";
 
 export default function Connect() {
   const router = useRouter();
   const [conns, setConns] = useState<Conn[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showModal, setShowModal] = useState<null | "instagram" | "facebook">(null);
+  const [showModal, setShowModal] = useState<null | ConnectPlatform>(null);
   const [handle, setHandle] = useState("");
   const [working, setWorking] = useState(false);
 
@@ -58,7 +59,7 @@ export default function Connect() {
 
         <Text style={styles.title}>Connect your accounts</Text>
         <Text style={styles.subtitle}>
-          Link your Instagram (and optionally Facebook) so we can publish posts for you.
+          Link your Instagram, Facebook, and TikTok accounts so we can publish posts for you.
         </Text>
 
         <PlatformCard
@@ -82,6 +83,17 @@ export default function Connect() {
           onDisconnect={() => onDisconnect("facebook")}
         />
 
+        <PlatformCard
+          platform="tiktok"
+          title="TikTok"
+          subtitle="Optional - publish short-form promo posts"
+          icon="musical-notes"
+          color="#111111"
+          conn={connected("tiktok")}
+          onConnect={() => setShowModal("tiktok")}
+          onDisconnect={() => onDisconnect("tiktok")}
+        />
+
         <View style={styles.note}>
           <Ionicons name="information-circle-outline" size={18} color={theme.colors.text600} />
           <Text style={styles.noteText}>
@@ -94,11 +106,11 @@ export default function Connect() {
         <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalWrap}>
           <View style={styles.modal}>
             <Text style={styles.modalTitle}>
-              Connect {showModal === "instagram" ? "Instagram" : "Facebook"}
+              Connect {showModal === "instagram" ? "Instagram" : showModal === "facebook" ? "Facebook" : "TikTok"}
             </Text>
             <Text style={styles.modalSub}>Enter your account handle or page name.</Text>
             <TextInput
-              placeholder={showModal === "instagram" ? "@yourbusiness" : "Your Page name"}
+              placeholder={showModal === "instagram" ? "@yourbusiness" : showModal === "facebook" ? "Your Page name" : "@yourtiktok"}
               placeholderTextColor={theme.colors.text400}
               value={handle}
               onChangeText={setHandle}

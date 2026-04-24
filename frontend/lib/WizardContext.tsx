@@ -21,6 +21,7 @@ type WizardState = {
   selectedCaption: GeneratedCaption | null;
   instagramEnabled: boolean;
   facebookEnabled: boolean;
+  tiktokEnabled: boolean;
 };
 
 const initial: WizardState = {
@@ -34,6 +35,7 @@ const initial: WizardState = {
   selectedCaption: null,
   instagramEnabled: true,
   facebookEnabled: false,
+  tiktokEnabled: false,
 };
 
 type WizardCtx = WizardState & {

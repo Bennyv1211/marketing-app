@@ -12,7 +12,7 @@ import { useWizard } from "../../lib/WizardContext";
 export default function ReviewStep() {
   const router = useRouter();
   const {
-    selectedImage, selectedCaption, instagramEnabled, facebookEnabled, set, reset,
+    selectedImage, selectedCaption, instagramEnabled, facebookEnabled, tiktokEnabled, set, reset,
   } = useWizard();
   const [publishing, setPublishing] = useState(false);
   const [result, setResult] = useState<null | { ok: boolean; message: string; warnings: string[] }>(null);
@@ -30,7 +30,7 @@ export default function ReviewStep() {
   }
 
   const onPublish = async () => {
-    if (!instagramEnabled && !facebookEnabled) {
+    if (!instagramEnabled && !facebookEnabled && !tiktokEnabled) {
       setResult({ ok: false, message: "Please turn on at least one platform.", warnings: [] });
       return;
     }
@@ -42,6 +42,7 @@ export default function ReviewStep() {
         generated_caption_id: selectedCaption.id,
         instagram_enabled: instagramEnabled,
         facebook_enabled: facebookEnabled,
+        tiktok_enabled: tiktokEnabled,
         schedule_for: null,
       });
       setResult({
@@ -87,7 +88,7 @@ export default function ReviewStep() {
           icon="logo-instagram"
           color="#E1306C"
           value={instagramEnabled}
-          onChange={(v) => set("instagramEnabled", v)}
+          onChange={(v: boolean) => set("instagramEnabled", v)}
           testID="toggle-instagram"
         />
         <ToggleRow
@@ -96,8 +97,17 @@ export default function ReviewStep() {
           icon="logo-facebook"
           color="#1877F2"
           value={facebookEnabled}
-          onChange={(v) => set("facebookEnabled", v)}
+          onChange={(v: boolean) => set("facebookEnabled", v)}
           testID="toggle-facebook"
+        />
+        <ToggleRow
+          title="TikTok"
+          subtitle="Optional"
+          icon="musical-notes"
+          color="#111111"
+          value={tiktokEnabled}
+          onChange={(v: boolean) => set("tiktokEnabled", v)}
+          testID="toggle-tiktok"
         />
 
         <View style={styles.confirmBox}>
