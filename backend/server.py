@@ -132,6 +132,37 @@ def _extract_result_urls(result_json: str | dict | list | None) -> list[str]:
     return []
 
 
+def _extract_kie_task_id(payload: dict | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    candidates: list[dict] = [payload]
+    data = payload.get("data")
+    if isinstance(data, dict):
+        candidates.append(data)
+    for candidate in candidates:
+        for key in ("taskId", "task_id", "jobId", "job_id", "id"):
+            value = candidate.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
+def _extract_kie_error(payload: dict | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    for key in ("msg", "message", "error", "detail"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    data = payload.get("data")
+    if isinstance(data, dict):
+        for key in ("msg", "message", "error", "detail"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    return None
+
+
 async def _create_kie_image_task(prompt: str, image_b64: str, mime_type: str) -> str:
     require_config(KIE_API_KEY, "KIE_API_KEY")
     payload = {
@@ -150,9 +181,15 @@ async def _create_kie_image_task(prompt: str, image_b64: str, mime_type: str) ->
         payload=payload,
         timeout=60,
     )
-    task_id = ((data or {}).get("data") or {}).get("taskId")
+    task_id = _extract_kie_task_id(data)
     if not task_id:
-        raise HTTPException(status_code=502, detail="Image provider did not return a task ID.")
+        provider_error = _extract_kie_error(data)
+        if provider_error:
+            raise HTTPException(status_code=502, detail=f"Image provider error: {provider_error}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Image provider did not return a task ID. Response: {json.dumps(data)[:500]}",
+        )
     return task_id
 
 
