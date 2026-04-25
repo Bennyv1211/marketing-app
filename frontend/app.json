@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "AdFlow",
-    "slug": "adflow",
+    "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/adflow-icon.png",
