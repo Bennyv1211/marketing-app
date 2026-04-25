@@ -1,7 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
-const TOKEN_KEY = "autosocial_token";
+const TOKEN_KEY = "adflow_token";
 
 export async function getToken(): Promise<string | null> {
   try {
@@ -67,6 +67,7 @@ export const api = {
   generateCaptions: (payload: any) => apiFetch("/generate/captions", { method: "POST", body: payload }),
   createPost: (payload: any) => apiFetch("/posts", { method: "POST", body: payload }),
   listPosts: () => apiFetch("/posts"),
+  getPost: (id: string) => apiFetch(`/posts/${id}`),
   dashboard: () => apiFetch("/dashboard/summary"),
   usageToday: () => apiFetch("/usage/today"),
   selectGeneratedImage: (id: string) =>

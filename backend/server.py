@@ -59,12 +59,12 @@ R2_ENDPOINT_URL = (
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
 
-app = FastAPI(title="AutoSocial AI")
+app = FastAPI(title="AdFlow")
 api_router = APIRouter(prefix="/api")
 security = HTTPBearer(auto_error=False)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-logger = logging.getLogger("autosocial")
+logger = logging.getLogger("adflow")
 
 
 def utcnow() -> datetime:
@@ -337,7 +337,7 @@ async def _upload_kie_base64_image(image_b64: str, mime_type: str) -> str:
     extension = mimetypes.guess_extension(mime_type or "") or ".png"
     upload_payload = {
         "base64Data": f"data:{mime_type};base64,{image_b64}",
-        "uploadPath": "images/autosocial",
+        "uploadPath": "images/adflow",
         "fileName": f"upload-{uuid.uuid4().hex}{extension}",
     }
     data = await _post_json(
@@ -1159,7 +1159,7 @@ async def dashboard_summary(user=Depends(get_current_user)):
 # -------------------- Health --------------------
 @api_router.get("/")
 async def root():
-    return {"app": "AutoSocial AI", "status": "ok", "time": now_iso()}
+    return {"app": "AdFlow", "status": "ok", "time": now_iso()}
 
 
 # -------------------- Wire up --------------------

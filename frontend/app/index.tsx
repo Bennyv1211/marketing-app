@@ -31,7 +31,7 @@ export default function Landing() {
           />
           <View style={styles.heroOverlay} />
           <View style={styles.heroBadge}>
-            <Text style={styles.heroBadgeText}>AutoSocial AI</Text>
+            <Text style={styles.heroBadgeText}>AdFlow</Text>
           </View>
         </View>
 
