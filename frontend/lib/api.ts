@@ -57,6 +57,8 @@ export const api = {
   saveBusiness: (b: any) => apiFetch("/business", { method: "POST", body: b }),
   getBusiness: () => apiFetch("/business"),
   listConnections: () => apiFetch("/social/connections"),
+  startMetaConnect: (platform: "instagram" | "facebook", app_redirect_uri: string) =>
+    apiFetch(`/social/meta/start?platform=${encodeURIComponent(platform)}&app_redirect_uri=${encodeURIComponent(app_redirect_uri)}`),
   connectSocial: (platform: string, account_name: string) =>
     apiFetch("/social/connections", { method: "POST", body: { platform, account_name } }),
   disconnectSocial: (platform: string) =>

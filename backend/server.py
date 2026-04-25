@@ -8,12 +8,14 @@ import mimetypes
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Literal
+from urllib.parse import urlencode
 
 import jwt
 import bcrypt
 import requests
 import boto3
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -50,6 +52,12 @@ R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID", "")
 R2_SECRET_ACCESS_KEY = os.environ.get("R2_SECRET_ACCESS_KEY", "")
 R2_BUCKET_NAME = os.environ.get("R2_BUCKET_NAME", "")
 R2_PRESIGNED_URL_EXPIRE_SECONDS = int(os.environ.get("R2_PRESIGNED_URL_EXPIRE_SECONDS", "86400"))
+META_APP_ID = os.environ.get("META_APP_ID", "").strip()
+META_APP_SECRET = os.environ.get("META_APP_SECRET", "").strip()
+META_REDIRECT_URI = os.environ.get("META_REDIRECT_URI", "").strip()
+META_GRAPH_API_BASE_URL = os.environ.get("META_GRAPH_API_BASE_URL", "https://graph.facebook.com/v23.0").rstrip("/")
+META_OAUTH_BASE_URL = os.environ.get("META_OAUTH_BASE_URL", "https://www.facebook.com/v23.0").rstrip("/")
+META_APP_REDIRECT_URI = os.environ.get("META_APP_REDIRECT_URI", "adflow://connect").strip()
 R2_ENDPOINT_URL = (
     f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com".rstrip("/")
     if R2_ACCOUNT_ID
@@ -82,6 +90,18 @@ def require_config(value: str, name: str):
             detail=f"{name} is not configured on the server yet.",
         )
     return value
+
+
+def _meta_redirect_with_status(app_redirect_uri: str, *, status_value: str, message: str = "", platforms: str = ""):
+    separator = "&" if "?" in app_redirect_uri else "?"
+    query = urlencode(
+        {
+            "status": status_value,
+            "message": message,
+            "platforms": platforms,
+        }
+    )
+    return RedirectResponse(f"{app_redirect_uri}{separator}{query}", status_code=302)
 
 
 def _r2_client():
@@ -250,6 +270,87 @@ async def _get_binary(url: str, *, timeout: int = 120) -> tuple[bytes, str]:
         return await asyncio.to_thread(_do_get)
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"Could not download generated image: {exc}") from exc
+
+
+def _meta_headers(access_token: str) -> dict:
+    return {"Authorization": f"Bearer {access_token}"}
+
+
+async def _meta_get(path: str, *, access_token: str, params: Optional[dict] = None) -> dict:
+    query = urlencode(params or {})
+    url = f"{META_GRAPH_API_BASE_URL}{path}"
+    if query:
+        url = f"{url}?{query}"
+    return await _get_json(url, headers=_meta_headers(access_token), timeout=60)
+
+
+async def _exchange_meta_code_for_user_token(code: str) -> str:
+    require_config(META_APP_ID, "META_APP_ID")
+    require_config(META_APP_SECRET, "META_APP_SECRET")
+    require_config(META_REDIRECT_URI, "META_REDIRECT_URI")
+    params = urlencode(
+        {
+            "client_id": META_APP_ID,
+            "client_secret": META_APP_SECRET,
+            "redirect_uri": META_REDIRECT_URI,
+            "code": code,
+        }
+    )
+    token_data = await _get_json(
+        f"{META_GRAPH_API_BASE_URL}/oauth/access_token?{params}",
+        headers={},
+        timeout=60,
+    )
+    user_token = token_data.get("access_token")
+    if not user_token:
+        raise HTTPException(status_code=502, detail="Meta did not return a user access token.")
+
+    exchange_params = urlencode(
+        {
+            "grant_type": "fb_exchange_token",
+            "client_id": META_APP_ID,
+            "client_secret": META_APP_SECRET,
+            "fb_exchange_token": user_token,
+        }
+    )
+    exchange_data = await _get_json(
+        f"{META_GRAPH_API_BASE_URL}/oauth/access_token?{exchange_params}",
+        headers={},
+        timeout=60,
+    )
+    return exchange_data.get("access_token") or user_token
+
+
+async def _upsert_social_connection(
+    *,
+    user_id: str,
+    platform: str,
+    account_name: str,
+    account_id: str,
+    access_token: str,
+    metadata: Optional[dict] = None,
+):
+    existing = await db.social_connections.find_one({"user_id": user_id, "platform": platform})
+    doc = {
+        "id": existing["id"] if existing else str(uuid.uuid4()),
+        "user_id": user_id,
+        "platform": platform,
+        "account_name": account_name,
+        "account_id": account_id,
+        "status": "connected",
+        "access_token": access_token,
+        "metadata": metadata or {},
+        "created_at": existing.get("created_at", now_iso()) if existing else now_iso(),
+        "updated_at": now_iso(),
+    }
+    if existing:
+        await db.social_connections.update_one(
+            {"user_id": user_id, "platform": platform},
+            {"$set": doc},
+        )
+    else:
+        await db.social_connections.insert_one(doc.copy())
+    return doc
 
 
 def _extract_result_urls(result_json: str | dict | list | None) -> list[str]:
@@ -629,15 +730,149 @@ async def get_business(user=Depends(get_current_user)):
     return biz or {}
 
 
-# -------------------- Social Connections (mocked) --------------------
+# -------------------- Social Connections --------------------
 @api_router.get("/social/connections")
 async def list_connections(user=Depends(get_current_user)):
-    rows = await db.social_connections.find({"user_id": user["id"]}, {"_id": 0}).to_list(100)
+    rows = await db.social_connections.find(
+        {"user_id": user["id"]},
+        {"_id": 0, "access_token": 0},
+    ).to_list(100)
     return rows
+
+
+@api_router.get("/social/meta/start")
+async def start_meta_connect(platform: Literal["instagram", "facebook"], app_redirect_uri: Optional[str] = None, user=Depends(get_current_user)):
+    require_config(META_APP_ID, "META_APP_ID")
+    require_config(META_APP_SECRET, "META_APP_SECRET")
+    require_config(META_REDIRECT_URI, "META_REDIRECT_URI")
+
+    state = uuid.uuid4().hex
+    app_redirect = (app_redirect_uri or META_APP_REDIRECT_URI).strip() or META_APP_REDIRECT_URI
+    await db.oauth_states.insert_one(
+        {
+            "id": str(uuid.uuid4()),
+            "state": state,
+            "user_id": user["id"],
+            "platform": platform,
+            "app_redirect_uri": app_redirect,
+            "created_at": now_iso(),
+            "expires_at": (utcnow() + timedelta(minutes=15)).isoformat(),
+        }
+    )
+    scopes = [
+        "public_profile",
+        "email",
+        "pages_show_list",
+        "pages_read_engagement",
+        "pages_manage_posts",
+        "instagram_basic",
+        "instagram_content_publish",
+        "business_management",
+    ]
+    auth_url = f"{META_OAUTH_BASE_URL}/dialog/oauth?" + urlencode(
+        {
+            "client_id": META_APP_ID,
+            "redirect_uri": META_REDIRECT_URI,
+            "scope": ",".join(scopes),
+            "response_type": "code",
+            "state": state,
+        }
+    )
+    return {"auth_url": auth_url}
+
+
+@api_router.get("/oauth/meta/callback")
+async def meta_oauth_callback(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None, error_message: Optional[str] = None):
+    state_doc = await db.oauth_states.find_one({"state": state}) if state else None
+    app_redirect = (state_doc or {}).get("app_redirect_uri") or META_APP_REDIRECT_URI
+
+    if error:
+        message = error_message or error
+        return _meta_redirect_with_status(app_redirect, status_value="error", message=message)
+
+    if not state_doc:
+        return HTMLResponse("<h1>Meta connection failed</h1><p>OAuth state expired or was invalid.</p>", status_code=400)
+    if not code:
+        await db.oauth_states.delete_one({"state": state})
+        return _meta_redirect_with_status(app_redirect, status_value="error", message="Missing authorization code")
+
+    try:
+        access_token = await _exchange_meta_code_for_user_token(code)
+        profile = await _meta_get("/me", access_token=access_token, params={"fields": "id,name,email"})
+        pages = await _meta_get("/me/accounts", access_token=access_token, params={"fields": "id,name,access_token"})
+
+        facebook_page = None
+        instagram_account = None
+        connected_platforms: list[str] = []
+
+        page_rows = pages.get("data", []) if isinstance(pages, dict) else []
+        if page_rows:
+            facebook_page = page_rows[0]
+            page_token = facebook_page.get("access_token") or access_token
+            page_detail = await _meta_get(
+                f"/{facebook_page['id']}",
+                access_token=page_token,
+                params={"fields": "id,name,instagram_business_account{id,username,name}"},
+            )
+            instagram_account = page_detail.get("instagram_business_account")
+
+            await _upsert_social_connection(
+                user_id=state_doc["user_id"],
+                platform="facebook",
+                account_name=facebook_page.get("name") or profile.get("name") or "Facebook Page",
+                account_id=facebook_page["id"],
+                access_token=page_token,
+                metadata={
+                    "meta_user_id": profile.get("id"),
+                    "meta_user_name": profile.get("name"),
+                    "meta_user_email": profile.get("email"),
+                },
+            )
+            connected_platforms.append("facebook")
+
+            if instagram_account:
+                await _upsert_social_connection(
+                    user_id=state_doc["user_id"],
+                    platform="instagram",
+                    account_name=instagram_account.get("username") or instagram_account.get("name") or "Instagram Business",
+                    account_id=instagram_account["id"],
+                    access_token=page_token,
+                    metadata={
+                        "facebook_page_id": facebook_page["id"],
+                        "facebook_page_name": facebook_page.get("name"),
+                    },
+                )
+                connected_platforms.append("instagram")
+
+        if not connected_platforms:
+            raise HTTPException(
+                status_code=400,
+                detail="Meta login succeeded, but no Facebook Page or linked Instagram business account was found.",
+            )
+
+        await db.oauth_states.delete_one({"state": state})
+        return _meta_redirect_with_status(
+            app_redirect,
+            status_value="success",
+            message="Connected successfully",
+            platforms=",".join(connected_platforms),
+        )
+    except HTTPException as exc:
+        await db.oauth_states.delete_one({"state": state})
+        return _meta_redirect_with_status(app_redirect, status_value="error", message=str(exc.detail))
+    except Exception as exc:
+        logger.exception("Meta OAuth callback failed")
+        await db.oauth_states.delete_one({"state": state})
+        return _meta_redirect_with_status(app_redirect, status_value="error", message=f"Meta connection failed: {exc}")
 
 
 @api_router.post("/social/connections")
 async def connect_social(data: SocialConnectIn, user=Depends(get_current_user)):
+    if data.platform in {"instagram", "facebook"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Instagram and Facebook now use Meta OAuth. Start the connection from the connect screen.",
+        )
     existing = await db.social_connections.find_one({"user_id": user["id"], "platform": data.platform})
     doc = {
         "id": existing["id"] if existing else str(uuid.uuid4()),
@@ -1080,7 +1315,7 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
 async def _hydrate_post(post: dict) -> dict:
     gi = await db.generated_images.find_one(
         {"id": post["generated_image_id"]},
-        {"_id": 0, "storage_key": 1, "image_base64": 1, "mime_type": 1, "style_name": 1, "user_id": 1, "id": 1},
+        {"_id": 0, "storage_key": 1, "image_base64": 1, "mime_type": 1, "style_name": 1, "generation_prompt": 1, "user_id": 1, "id": 1},
     )
     gc = await db.generated_captions.find_one(
         {"id": post["generated_caption_id"]},
@@ -1097,6 +1332,7 @@ async def _hydrate_post(post: dict) -> dict:
         await _ensure_generated_image_in_r2(gi)
         out["image_data_uri"] = await _signed_r2_url(gi["storage_key"])
         out["image_style"] = gi.get("style_name")
+        out["generation_prompt"] = gi.get("generation_prompt", "")
     if gc:
         out["caption_text"] = gc.get("caption_text", "")
         out["caption_hashtags"] = gc.get("hashtags", [])
