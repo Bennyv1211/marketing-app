@@ -59,6 +59,10 @@ export const api = {
   listConnections: () => apiFetch("/social/connections"),
   startMetaConnect: (platform: "instagram" | "facebook", app_redirect_uri: string) =>
     apiFetch(`/social/meta/start?platform=${encodeURIComponent(platform)}&app_redirect_uri=${encodeURIComponent(app_redirect_uri)}`),
+  getMetaConnectionOptions: (selectionId: string) =>
+    apiFetch(`/social/meta/options/${encodeURIComponent(selectionId)}`),
+  selectMetaConnectionOption: (selectionId: string, page_id: string) =>
+    apiFetch(`/social/meta/options/${encodeURIComponent(selectionId)}/select`, { method: "POST", body: { page_id } }),
   connectSocial: (platform: string, account_name: string) =>
     apiFetch("/social/connections", { method: "POST", body: { platform, account_name } }),
   disconnectSocial: (platform: string) =>

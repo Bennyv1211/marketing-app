@@ -12,6 +12,11 @@ import { api } from "../lib/api";
 WebBrowser.maybeCompleteAuthSession();
 
 type Conn = { platform: string; account_name: string; status: string };
+type MetaOption = {
+  page_id: string;
+  page_name: string;
+  instagram_account?: { id: string; username?: string; name?: string } | null;
+};
 
 export default function Connect() {
   const router = useRouter();
@@ -20,6 +25,9 @@ export default function Connect() {
   const [showTikTokModal, setShowTikTokModal] = useState(false);
   const [handle, setHandle] = useState("");
   const [working, setWorking] = useState(false);
+  const [metaSelectionId, setMetaSelectionId] = useState<string | null>(null);
+  const [metaRequestedPlatform, setMetaRequestedPlatform] = useState<"instagram" | "facebook" | null>(null);
+  const [metaOptions, setMetaOptions] = useState<MetaOption[]>([]);
 
   const load = async () => {
     try {
@@ -48,8 +56,18 @@ export default function Connect() {
         const parsed = Linking.parse(result.url);
         const status = typeof parsed.queryParams?.status === "string" ? parsed.queryParams.status : "";
         const message = typeof parsed.queryParams?.message === "string" ? parsed.queryParams.message : "";
+        const selectionId = typeof parsed.queryParams?.selection_id === "string" ? parsed.queryParams.selection_id : "";
         if (status === "error") {
           Alert.alert("Connection failed", message || "Meta connection did not complete.");
+        } else if (status === "select" && selectionId) {
+          const optionsPayload = (await api.getMetaConnectionOptions(selectionId)) as {
+            id: string;
+            requested_platform: "instagram" | "facebook";
+            options: MetaOption[];
+          };
+          setMetaSelectionId(optionsPayload.id);
+          setMetaRequestedPlatform(optionsPayload.requested_platform);
+          setMetaOptions(optionsPayload.options || []);
         }
       }
 
@@ -70,6 +88,23 @@ export default function Connect() {
       setShowTikTokModal(false);
       setHandle("");
       await load();
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  const onSelectMetaAccount = async (pageId: string) => {
+    if (!metaSelectionId) return;
+    setWorking(true);
+    try {
+      await api.selectMetaConnectionOption(metaSelectionId, pageId);
+      setMetaSelectionId(null);
+      setMetaRequestedPlatform(null);
+      setMetaOptions([]);
+      await load();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not save the selected Meta account.";
+      Alert.alert("Selection failed", message);
     } finally {
       setWorking(false);
     }
@@ -163,6 +198,45 @@ export default function Connect() {
             />
             <View style={{ height: 8 }} />
             <Button label="Cancel" variant="secondary" onPress={() => setShowTikTokModal(false)} testID="connect-cancel" />
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={!!metaSelectionId} transparent animationType="slide" onRequestClose={() => setMetaSelectionId(null)}>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={styles.modalWrap}>
+          <View style={styles.modal}>
+            <Text style={styles.modalTitle}>Choose your {metaRequestedPlatform === "instagram" ? "Instagram account" : "Facebook Page"}</Text>
+            <Text style={styles.modalSub}>
+              We found more than one eligible Meta account. Pick the Page you want AdFlow to use.
+            </Text>
+            <ScrollView style={styles.optionList} contentContainerStyle={{ gap: 10 }}>
+              {metaOptions.map((option) => (
+                <TouchableOpacity
+                  key={option.page_id}
+                  style={styles.optionCard}
+                  onPress={() => onSelectMetaAccount(option.page_id)}
+                  disabled={working}
+                >
+                  <Text style={styles.optionTitle}>{option.page_name}</Text>
+                  <Text style={styles.optionSub}>
+                    {option.instagram_account
+                      ? `Instagram: @${option.instagram_account.username || option.instagram_account.name || "linked"}`
+                      : "No linked Instagram business account"}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <View style={{ height: 8 }} />
+            <Button
+              label="Cancel"
+              variant="secondary"
+              onPress={() => {
+                setMetaSelectionId(null);
+                setMetaRequestedPlatform(null);
+                setMetaOptions([]);
+              }}
+              testID="meta-select-cancel"
+            />
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -290,5 +364,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     fontSize: 16,
     color: theme.colors.text900,
+  },
+  optionList: {
+    maxHeight: 260,
+  },
+  optionCard: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 16,
+    padding: 14,
+    backgroundColor: "#fff",
+  },
+  optionTitle: {
+    fontSize: 16,
+    fontWeight: "800",
+    color: theme.colors.text900,
+    marginBottom: 4,
+  },
+  optionSub: {
+    fontSize: 13,
+    color: theme.colors.text600,
   },
 });

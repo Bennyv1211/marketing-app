@@ -92,15 +92,16 @@ def require_config(value: str, name: str):
     return value
 
 
-def _meta_redirect_with_status(app_redirect_uri: str, *, status_value: str, message: str = "", platforms: str = ""):
+def _meta_redirect_with_status(app_redirect_uri: str, *, status_value: str, message: str = "", platforms: str = "", extra: Optional[dict] = None):
     separator = "&" if "?" in app_redirect_uri else "?"
-    query = urlencode(
-        {
-            "status": status_value,
-            "message": message,
-            "platforms": platforms,
-        }
-    )
+    params = {
+        "status": status_value,
+        "message": message,
+        "platforms": platforms,
+    }
+    if extra:
+        params.update({k: v for k, v in extra.items() if v is not None})
+    query = urlencode(params)
     return RedirectResponse(f"{app_redirect_uri}{separator}{query}", status_code=302)
 
 
@@ -398,6 +399,51 @@ async def _publish_instagram_photo(*, instagram_account_id: str, access_token: s
     return media_id
 
 
+async def _store_meta_connection_for_page(*, user_id: str, profile: dict, page_option: dict, requested_platform: str, access_token: str):
+    page_id = page_option["page_id"]
+    page_name = page_option.get("page_name") or "Facebook Page"
+    page_token = page_option.get("page_access_token") or access_token
+    instagram_account = page_option.get("instagram_account")
+
+    if requested_platform == "instagram" and not instagram_account:
+        raise HTTPException(
+            status_code=400,
+            detail="The selected Facebook Page does not have a linked Instagram business account.",
+        )
+
+    connected_platforms: list[str] = []
+    if requested_platform in {"facebook", "instagram"}:
+        await _upsert_social_connection(
+            user_id=user_id,
+            platform="facebook",
+            account_name=page_name,
+            account_id=page_id,
+            access_token=page_token,
+            metadata={
+                "meta_user_id": profile.get("id"),
+                "meta_user_name": profile.get("name"),
+                "meta_user_email": profile.get("email"),
+            },
+        )
+        connected_platforms.append("facebook")
+
+    if instagram_account:
+        await _upsert_social_connection(
+            user_id=user_id,
+            platform="instagram",
+            account_name=instagram_account.get("username") or instagram_account.get("name") or "Instagram Business",
+            account_id=instagram_account["id"],
+            access_token=page_token,
+            metadata={
+                "facebook_page_id": page_id,
+                "facebook_page_name": page_name,
+            },
+        )
+        connected_platforms.append("instagram")
+
+    return connected_platforms
+
+
 def _extract_result_urls(result_json: str | dict | list | None) -> list[str]:
     parsed = result_json
     if isinstance(result_json, str):
@@ -645,6 +691,10 @@ class SocialConnectIn(BaseModel):
     account_name: str
 
 
+class MetaConnectionSelectionIn(BaseModel):
+    page_id: str
+
+
 class UploadIn(BaseModel):
     image_base64: str  # raw base64 (no data: prefix)
     mime_type: str = "image/jpeg"
@@ -845,14 +895,9 @@ async def meta_oauth_callback(code: Optional[str] = None, state: Optional[str] =
         access_token = await _exchange_meta_code_for_user_token(code)
         profile = await _meta_get("/me", access_token=access_token, params={"fields": "id,name,email"})
         pages = await _meta_get("/me/accounts", access_token=access_token, params={"fields": "id,name,access_token"})
-
-        facebook_page = None
-        instagram_account = None
-        connected_platforms: list[str] = []
-
         page_rows = pages.get("data", []) if isinstance(pages, dict) else []
-        if page_rows:
-            facebook_page = page_rows[0]
+        page_options = []
+        for facebook_page in page_rows:
             page_token = facebook_page.get("access_token") or access_token
             page_detail = await _meta_get(
                 f"/{facebook_page['id']}",
@@ -860,47 +905,67 @@ async def meta_oauth_callback(code: Optional[str] = None, state: Optional[str] =
                 params={"fields": "id,name,instagram_business_account{id,username,name}"},
             )
             instagram_account = page_detail.get("instagram_business_account")
-
-            await _upsert_social_connection(
-                user_id=state_doc["user_id"],
-                platform="facebook",
-                account_name=facebook_page.get("name") or profile.get("name") or "Facebook Page",
-                account_id=facebook_page["id"],
-                access_token=page_token,
-                metadata={
-                    "meta_user_id": profile.get("id"),
-                    "meta_user_name": profile.get("name"),
-                    "meta_user_email": profile.get("email"),
-                },
+            page_options.append(
+                {
+                    "page_id": facebook_page["id"],
+                    "page_name": facebook_page.get("name") or "Facebook Page",
+                    "page_access_token": page_token,
+                    "instagram_account": instagram_account,
+                }
             )
-            connected_platforms.append("facebook")
 
-            if instagram_account:
-                await _upsert_social_connection(
-                    user_id=state_doc["user_id"],
-                    platform="instagram",
-                    account_name=instagram_account.get("username") or instagram_account.get("name") or "Instagram Business",
-                    account_id=instagram_account["id"],
-                    access_token=page_token,
-                    metadata={
-                        "facebook_page_id": facebook_page["id"],
-                        "facebook_page_name": facebook_page.get("name"),
-                    },
-                )
-                connected_platforms.append("instagram")
+        requested_platform = state_doc.get("platform", "facebook")
+        eligible_options = [
+            option for option in page_options
+            if requested_platform != "instagram" or option.get("instagram_account")
+        ]
 
-        if not connected_platforms:
+        if not eligible_options:
             raise HTTPException(
                 status_code=400,
-                detail="Meta login succeeded, but no Facebook Page or linked Instagram business account was found.",
+                detail="Meta login succeeded, but no eligible Facebook Page or linked Instagram business account was found.",
             )
 
+        if len(eligible_options) == 1:
+            connected_platforms = await _store_meta_connection_for_page(
+                user_id=state_doc["user_id"],
+                profile=profile,
+                page_option=eligible_options[0],
+                requested_platform=requested_platform,
+                access_token=access_token,
+            )
+            await db.oauth_states.delete_one({"state": state})
+            return _meta_redirect_with_status(
+                app_redirect,
+                status_value="success",
+                message="Connected successfully",
+                platforms=",".join(connected_platforms),
+            )
+
+        selection_id = str(uuid.uuid4())
+        await db.meta_connection_options.insert_one(
+            {
+                "id": selection_id,
+                "user_id": state_doc["user_id"],
+                "requested_platform": requested_platform,
+                "profile": {
+                    "id": profile.get("id"),
+                    "name": profile.get("name"),
+                    "email": profile.get("email"),
+                },
+                "access_token": access_token,
+                "options": eligible_options,
+                "created_at": now_iso(),
+                "expires_at": (utcnow() + timedelta(minutes=30)).isoformat(),
+            }
+        )
         await db.oauth_states.delete_one({"state": state})
         return _meta_redirect_with_status(
             app_redirect,
-            status_value="success",
-            message="Connected successfully",
-            platforms=",".join(connected_platforms),
+            status_value="select",
+            message="Choose which account to connect",
+            platforms=requested_platform,
+            extra={"selection_id": selection_id},
         )
     except HTTPException as exc:
         await db.oauth_states.delete_one({"state": state})
@@ -937,6 +1002,53 @@ async def connect_social(data: SocialConnectIn, user=Depends(get_current_user)):
         await db.social_connections.insert_one(doc.copy())
     doc.pop("_id", None)
     return doc
+
+
+@api_router.get("/social/meta/options/{selection_id}")
+async def get_meta_connection_options(selection_id: str, user=Depends(get_current_user)):
+    doc = await db.meta_connection_options.find_one(
+        {"id": selection_id, "user_id": user["id"]},
+        {"_id": 0, "id": 1, "requested_platform": 1, "options": 1},
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Meta account selection expired or was not found.")
+
+    cleaned_options = []
+    for option in doc.get("options", []):
+        cleaned_options.append(
+            {
+                "page_id": option["page_id"],
+                "page_name": option.get("page_name") or "Facebook Page",
+                "instagram_account": option.get("instagram_account"),
+            }
+        )
+
+    return {
+        "id": doc["id"],
+        "requested_platform": doc.get("requested_platform", "facebook"),
+        "options": cleaned_options,
+    }
+
+
+@api_router.post("/social/meta/options/{selection_id}/select")
+async def select_meta_connection_option(selection_id: str, data: MetaConnectionSelectionIn, user=Depends(get_current_user)):
+    doc = await db.meta_connection_options.find_one({"id": selection_id, "user_id": user["id"]})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Meta account selection expired or was not found.")
+
+    option = next((item for item in doc.get("options", []) if item.get("page_id") == data.page_id), None)
+    if not option:
+        raise HTTPException(status_code=404, detail="The selected Meta account was not found.")
+
+    connected_platforms = await _store_meta_connection_for_page(
+        user_id=user["id"],
+        profile=doc.get("profile", {}),
+        page_option=option,
+        requested_platform=doc.get("requested_platform", "facebook"),
+        access_token=doc.get("access_token", ""),
+    )
+    await db.meta_connection_options.delete_one({"id": selection_id})
+    return {"status": "connected", "platforms": connected_platforms}
 
 
 @api_router.delete("/social/connections/{platform}")
