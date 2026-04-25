@@ -24,15 +24,9 @@ export default function Landing() {
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.hero}>
           <Image
-            source={{
-              uri: "https://images.unsplash.com/photo-1753351052046-8c6818304a4f?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NDh8MHwxfHNlYXJjaHwxfHxjb2ZmZWUlMjBzaG9wJTIwb3duZXIlMjBzbWlsaW5nfGVufDB8fHx8MTc3Njk1MjM2NHww&ixlib=rb-4.1.0&q=85",
-            }}
+            source={require("../assets/images/adflow-splash-screen.png")}
             style={styles.heroImage}
           />
-          <View style={styles.heroOverlay} />
-          <View style={styles.heroBadge}>
-            <Text style={styles.heroBadgeText}>AdFlow</Text>
-          </View>
         </View>
 
         <View style={styles.content}>
@@ -81,22 +75,15 @@ function Feature({ icon, label }: { icon: any; label: string }) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: theme.colors.bg },
   scroll: { flexGrow: 1 },
-  hero: { height: 280, position: "relative" },
-  heroImage: { width: "100%", height: "100%" },
-  heroOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(28,28,28,0.25)",
+  hero: {
+    height: 280,
+    position: "relative",
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
   },
-  heroBadge: {
-    position: "absolute",
-    top: 20,
-    left: 20,
-    backgroundColor: "rgba(255,255,255,0.92)",
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
-  },
-  heroBadgeText: { fontWeight: "800", color: theme.colors.primary, fontSize: 13, letterSpacing: 0.5 },
+  heroImage: { width: "100%", height: "100%", resizeMode: "contain" },
   content: { padding: 24, paddingTop: 28 },
   title: {
     fontSize: 30,
