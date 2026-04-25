@@ -353,6 +353,24 @@ async def _upsert_social_connection(
     return doc
 
 
+async def _publish_facebook_photo(*, page_id: str, access_token: str, image_url: str, caption_text: str) -> str:
+    payload = {
+        "url": image_url,
+        "caption": caption_text,
+        "published": True,
+    }
+    data = await _post_json(
+        f"{META_GRAPH_API_BASE_URL}/{page_id}/photos?access_token={access_token}",
+        headers={"Content-Type": "application/json"},
+        payload=payload,
+        timeout=120,
+    )
+    post_id = data.get("post_id") or data.get("id")
+    if not post_id:
+        raise HTTPException(status_code=502, detail="Meta did not return a Facebook post ID.")
+    return post_id
+
+
 def _extract_result_urls(result_json: str | dict | list | None) -> list[str]:
     parsed = result_json
     if isinstance(result_json, str):
@@ -1236,7 +1254,10 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Please choose at least one platform to publish to.")
 
     connections = await db.social_connections.find({"user_id": user["id"]}, {"_id": 0}).to_list(10)
-    connected_platforms = {c["platform"] for c in connections if c.get("status") == "connected"}
+    connections_by_platform = {
+        c["platform"]: c for c in connections if c.get("status") == "connected"
+    }
+    connected_platforms = set(connections_by_platform.keys())
 
     # Mark as selected
     await db.generated_images.update_one({"id": gen_img["id"]}, {"$set": {"is_selected": True}})
@@ -1248,17 +1269,69 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
     publish_status = "scheduled" if scheduled else "published"
     published_at = None if scheduled else now
 
-    import random
-    ig_post_id = f"mock_ig_{uuid.uuid4().hex[:10]}" if data.instagram_enabled and not scheduled else None
-    fb_post_id = f"mock_fb_{uuid.uuid4().hex[:10]}" if data.facebook_enabled and not scheduled else None
-    tt_post_id = f"mock_tt_{uuid.uuid4().hex[:10]}" if data.tiktok_enabled and not scheduled else None
-
-    # If platform toggled on but not connected → warn by marking failed for that platform (MVP: still succeed)
     warnings = []
+    await _ensure_generated_image_in_r2(gen_img)
+    image_url = await _signed_r2_url(gen_img["storage_key"])
+    hashtag_text = " ".join(gen_cap.get("hashtags", []))
+    caption_parts = [gen_cap.get("caption_text", "").strip(), gen_cap.get("cta", "").strip(), hashtag_text.strip()]
+    publish_caption = "\n\n".join(part for part in caption_parts if part)
+
+    ig_post_id = None
+    fb_post_id = None
+    tt_post_id = None
+
     if data.instagram_enabled and "instagram" not in connected_platforms:
         warnings.append("Instagram account is not connected — this post was saved but not actually sent.")
     if data.facebook_enabled and "facebook" not in connected_platforms:
         warnings.append("Facebook account is not connected — this post was saved but not actually sent.")
+    if data.tiktok_enabled and "tiktok" not in connected_platforms:
+        warnings.append("TikTok account is not connected — this post was saved but not actually sent.")
+
+    if not scheduled and data.facebook_enabled and "facebook" in connected_platforms:
+        fb_conn = connections_by_platform["facebook"]
+        try:
+            fb_post_id = await _publish_facebook_photo(
+                page_id=fb_conn["account_id"],
+                access_token=fb_conn["access_token"],
+                image_url=image_url,
+                caption_text=publish_caption,
+            )
+        except HTTPException as exc:
+            warnings.append(f"Facebook publish failed: {exc.detail}")
+            publish_status = "partial_failure" if not scheduled else publish_status
+
+    if not scheduled and data.instagram_enabled and "instagram" in connected_platforms:
+        ig_post_id = f"pending_instagram_{uuid.uuid4().hex[:10]}"
+        warnings.append("Instagram connection is real, but live publishing is not wired yet.")
+
+    if not scheduled and data.tiktok_enabled and "tiktok" in connected_platforms:
+        tt_post_id = f"mock_tt_{uuid.uuid4().hex[:10]}"
+        warnings.append("TikTok publishing is still mocked while the direct integration is in progress.")
+
+    if not scheduled:
+        attempted_live_platforms = [
+            platform
+            for platform, enabled in (
+                ("instagram", data.instagram_enabled),
+                ("facebook", data.facebook_enabled),
+                ("tiktok", data.tiktok_enabled),
+            )
+            if enabled and platform in connected_platforms
+        ]
+        successful_live_platforms = [
+            platform
+            for platform, post_identifier in (
+                ("instagram", ig_post_id if ig_post_id and not str(ig_post_id).startswith("pending_") else None),
+                ("facebook", fb_post_id),
+                ("tiktok", None),
+            )
+            if post_identifier
+        ]
+        if attempted_live_platforms and not successful_live_platforms:
+            publish_status = "failed"
+            published_at = None
+        elif warnings and successful_live_platforms:
+            publish_status = "partial_failure"
 
     post_doc = {
         "id": post_id,
@@ -1279,12 +1352,12 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
     }
     await db.posts.insert_one(post_doc.copy())
 
-    # Seed mock metrics if published now
-    if publish_status == "published":
+    # Seed demo metrics only for successful live destinations
+    if publish_status in {"published", "partial_failure"}:
+        import random
         for platform in (
-            (["instagram"] if data.instagram_enabled else [])
-            + (["facebook"] if data.facebook_enabled else [])
-            + (["tiktok"] if data.tiktok_enabled else [])
+            (["facebook"] if fb_post_id else [])
+            + (["instagram"] if ig_post_id and not str(ig_post_id).startswith("pending_") else [])
         ):
             metric = {
                 "id": str(uuid.uuid4()),
