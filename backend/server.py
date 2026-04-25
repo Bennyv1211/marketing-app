@@ -692,7 +692,7 @@ async def upload_image(data: UploadIn, user=Depends(get_current_user)):
 
 
 # -------------------- Image generation --------------------
-DAILY_IMAGE_GEN_LIMIT = 6
+DAILY_IMAGE_GEN_LIMIT = int(os.environ.get("DAILY_IMAGE_GEN_LIMIT", "0"))
 
 
 def _today_utc_date_str() -> str:
@@ -780,23 +780,25 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
     upload_bytes, upload_mime_type = await _ensure_uploaded_image_in_r2(upload)
     upload_b64 = base64.b64encode(upload_bytes).decode("utf-8")
 
-    # Enforce daily rate limit (per user, UTC day) BEFORE spending AI credits
     used_today = await _count_today_requests(user["id"])
-    if used_today >= DAILY_IMAGE_GEN_LIMIT:
-        raise HTTPException(
-            status_code=429,
-            detail=f"You've reached today's limit of {DAILY_IMAGE_GEN_LIMIT} ad image generations. Please come back tomorrow.",
-        )
+    req_doc = None
+    if DAILY_IMAGE_GEN_LIMIT > 0:
+        # Enforce daily rate limit (per user, UTC day) BEFORE spending AI credits
+        if used_today >= DAILY_IMAGE_GEN_LIMIT:
+            raise HTTPException(
+                status_code=429,
+                detail=f"You've reached today's limit of {DAILY_IMAGE_GEN_LIMIT} ad image generations. Please come back tomorrow.",
+            )
 
-    # Record the request up-front so parallel calls can't race past the cap
-    req_doc = {
-        "id": str(uuid.uuid4()),
-        "user_id": user["id"],
-        "day": _today_utc_date_str(),
-        "prompt": data.prompt,
-        "created_at": now_iso(),
-    }
-    await db.generation_requests.insert_one(req_doc.copy())
+        # Record the request up-front so parallel calls can't race past the cap
+        req_doc = {
+            "id": str(uuid.uuid4()),
+            "user_id": user["id"],
+            "day": _today_utc_date_str(),
+            "prompt": data.prompt,
+            "created_at": now_iso(),
+        }
+        await db.generation_requests.insert_one(req_doc.copy())
 
     variation_count = max(1, min(OPENAI_IMAGE_VARIATIONS, len(AD_STYLE_VARIATIONS)))
 
@@ -827,7 +829,7 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
             "storage_key": stored["key"],
             "generation_prompt": data.prompt,
             "variation_index": i,
-            "style_name": ["Warm lifestyle", "Bold minimal", "Vibrant flat-lay"][i],
+            "style_name": ["Signature AdFlow Look"][i],
             "created_at": now_iso(),
             "is_selected": False,
         }
@@ -841,14 +843,15 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
 
     if not generated:
         # Refund the quota if the entire batch failed (nothing usable produced)
-        await db.generation_requests.delete_one({"id": req_doc["id"]})
+        if req_doc:
+            await db.generation_requests.delete_one({"id": req_doc["id"]})
         raise HTTPException(status_code=502, detail="We couldn't generate your ad images right now. Please try again.")
     return {
         "images": generated,
         "usage": {
-            "used_today": used_today + 1,
+            "used_today": used_today + (1 if req_doc else 0),
             "limit": DAILY_IMAGE_GEN_LIMIT,
-            "remaining": max(0, DAILY_IMAGE_GEN_LIMIT - (used_today + 1)),
+            "remaining": None if DAILY_IMAGE_GEN_LIMIT <= 0 else max(0, DAILY_IMAGE_GEN_LIMIT - (used_today + 1)),
         },
     }
 
@@ -859,7 +862,7 @@ async def usage_today(user=Depends(get_current_user)):
     return {
         "used_today": used,
         "limit": DAILY_IMAGE_GEN_LIMIT,
-        "remaining": max(0, DAILY_IMAGE_GEN_LIMIT - used),
+        "remaining": None if DAILY_IMAGE_GEN_LIMIT <= 0 else max(0, DAILY_IMAGE_GEN_LIMIT - used),
         "day": _today_utc_date_str(),
     }
 
