@@ -371,6 +371,33 @@ async def _publish_facebook_photo(*, page_id: str, access_token: str, image_url:
     return post_id
 
 
+async def _publish_instagram_photo(*, instagram_account_id: str, access_token: str, image_url: str, caption_text: str) -> str:
+    create_payload = {
+        "image_url": image_url,
+        "caption": caption_text,
+    }
+    create_data = await _post_json(
+        f"{META_GRAPH_API_BASE_URL}/{instagram_account_id}/media?access_token={access_token}",
+        headers={"Content-Type": "application/json"},
+        payload=create_payload,
+        timeout=120,
+    )
+    creation_id = create_data.get("id")
+    if not creation_id:
+        raise HTTPException(status_code=502, detail="Meta did not return an Instagram media container ID.")
+
+    publish_data = await _post_json(
+        f"{META_GRAPH_API_BASE_URL}/{instagram_account_id}/media_publish?access_token={access_token}",
+        headers={"Content-Type": "application/json"},
+        payload={"creation_id": creation_id},
+        timeout=120,
+    )
+    media_id = publish_data.get("id")
+    if not media_id:
+        raise HTTPException(status_code=502, detail="Meta did not return an Instagram media ID.")
+    return media_id
+
+
 def _extract_result_urls(result_json: str | dict | list | None) -> list[str]:
     parsed = result_json
     if isinstance(result_json, str):
@@ -1301,8 +1328,17 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
             publish_status = "partial_failure" if not scheduled else publish_status
 
     if not scheduled and data.instagram_enabled and "instagram" in connected_platforms:
-        ig_post_id = f"pending_instagram_{uuid.uuid4().hex[:10]}"
-        warnings.append("Instagram connection is real, but live publishing is not wired yet.")
+        ig_conn = connections_by_platform["instagram"]
+        try:
+            ig_post_id = await _publish_instagram_photo(
+                instagram_account_id=ig_conn["account_id"],
+                access_token=ig_conn["access_token"],
+                image_url=image_url,
+                caption_text=publish_caption,
+            )
+        except HTTPException as exc:
+            warnings.append(f"Instagram publish failed: {exc.detail}")
+            publish_status = "partial_failure" if not scheduled else publish_status
 
     if not scheduled and data.tiktok_enabled and "tiktok" in connected_platforms:
         tt_post_id = f"mock_tt_{uuid.uuid4().hex[:10]}"
@@ -1321,7 +1357,7 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
         successful_live_platforms = [
             platform
             for platform, post_identifier in (
-                ("instagram", ig_post_id if ig_post_id and not str(ig_post_id).startswith("pending_") else None),
+                ("instagram", ig_post_id),
                 ("facebook", fb_post_id),
                 ("tiktok", None),
             )
@@ -1357,7 +1393,7 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
         import random
         for platform in (
             (["facebook"] if fb_post_id else [])
-            + (["instagram"] if ig_post_id and not str(ig_post_id).startswith("pending_") else [])
+            + (["instagram"] if ig_post_id else [])
         ):
             metric = {
                 "id": str(uuid.uuid4()),
