@@ -109,30 +109,8 @@ export default function Dashboard() {
           <>
             <View style={styles.metricsRow}>
               <MetricBox label="Total posts" value={String(summary?.total_posts ?? 0)} testID="metric-total" />
-              <MetricBox label="Total reach" value={String(summary?.total_reach ?? 0)} testID="metric-reach" />
-              <MetricBox label="Total likes" value={String(summary?.total_likes ?? 0)} testID="metric-likes" />
+              <MetricBox label="Published" value={String(summary?.published_count ?? 0)} testID="metric-published" />
             </View>
-
-            {summary?.most_recent ? (
-              <Text style={styles.friendly} testID="friendly-summary">
-                Your last post reached {summary.most_recent.metrics_total?.reach ?? 0} people.
-              </Text>
-            ) : null}
-
-            {summary?.best_performing ? (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Your best post so far</Text>
-                <PostCard
-                  post={summary.best_performing}
-                  onPress={() =>
-                    router.push({
-                      pathname: "/posts/[id]" as any,
-                      params: { id: summary.best_performing.id },
-                    })
-                  }
-                />
-              </View>
-            ) : null}
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Recent posts</Text>
@@ -200,24 +178,8 @@ function PostCard({ post, onPress }: { post: any; onPress: () => void }) {
           {dateStr && platforms.length ? " - " : ""}
           {platforms.join(", ")}
         </Text>
-        <View style={styles.postStats}>
-          <Stat icon="eye-outline" v={post.metrics_total?.reach} />
-          <Stat icon="heart-outline" v={post.metrics_total?.likes} />
-          <Stat icon="chatbubble-outline" v={post.metrics_total?.comments} />
-        </View>
       </View>
     </TouchableOpacity>
-  );
-}
-
-function Stat({ icon, v }: { icon: any; v: any }) {
-  return (
-    <View style={{ flexDirection: "row", alignItems: "center", marginRight: 12 }}>
-      <Ionicons name={icon} size={14} color={theme.colors.text600} />
-      <Text style={{ marginLeft: 4, fontSize: 12, color: theme.colors.text600, fontWeight: "600" }}>
-        {v ?? 0}
-      </Text>
-    </View>
   );
 }
 
@@ -268,15 +230,6 @@ const styles = StyleSheet.create({
   },
   metricValue: { fontSize: 22, fontWeight: "800", color: theme.colors.text900 },
   metricLabel: { fontSize: 12, color: theme.colors.text600, marginTop: 2 },
-  friendly: {
-    marginTop: 18,
-    padding: 14,
-    borderRadius: 16,
-    backgroundColor: theme.colors.primaryLight,
-    color: theme.colors.text800,
-    fontWeight: "600",
-    fontSize: 14,
-  },
   section: { marginTop: 24 },
   sectionTitle: { fontSize: 18, fontWeight: "800", color: theme.colors.text900, marginBottom: 12 },
   postCard: {
@@ -291,7 +244,6 @@ const styles = StyleSheet.create({
   postImg: { width: 70, height: 70, borderRadius: 14 },
   postSnippet: { fontSize: 14, color: theme.colors.text900, fontWeight: "600" },
   postMeta: { fontSize: 12, color: theme.colors.text600, marginTop: 4 },
-  postStats: { flexDirection: "row", marginTop: 8 },
   empty: {
     alignItems: "center",
     padding: 30,

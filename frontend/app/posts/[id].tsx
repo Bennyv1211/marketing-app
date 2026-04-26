@@ -154,30 +154,14 @@ export default function PostDetailScreen() {
               ) : null}
             </View>
 
-            <View style={styles.metricsRow}>
-              <MetricCard label="Reach" value={post.metrics_total?.reach} />
-              <MetricCard label="Likes" value={post.metrics_total?.likes} />
-              <MetricCard label="Comments" value={post.metrics_total?.comments} />
-            </View>
-
-            <View style={styles.metricsRow}>
-              <MetricCard label="Impressions" value={post.metrics_total?.impressions} />
-              <MetricCard label="Clicks" value={post.metrics_total?.clicks} />
-              <MetricCard label="Style" value={post.image_style || "-"} />
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Image style</Text>
+              <Text style={styles.detailValue}>{post.image_style || "-"}</Text>
             </View>
           </>
         )}
       </ScrollView>
     </SafeAreaView>
-  );
-}
-
-function MetricCard({ label, value }: { label: string; value: string | number | undefined }) {
-  return (
-    <View style={styles.metricCard}>
-      <Text style={styles.metricValue}>{value ?? 0}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
-    </View>
   );
 }
 
@@ -243,15 +227,12 @@ const styles = StyleSheet.create({
   caption: { fontSize: 16, color: theme.colors.text800, lineHeight: 24 },
   cta: { fontSize: 15, color: theme.colors.primary, fontWeight: "800", marginTop: 12 },
   tags: { fontSize: 13, color: theme.colors.secondary, fontWeight: "700", marginTop: 10 },
-  metricsRow: { flexDirection: "row", gap: 10, marginTop: 14 },
-  metricCard: {
-    flex: 1,
-    backgroundColor: "#fff",
-    borderRadius: 20,
+  detailRow: {
+    marginTop: 16,
     padding: 14,
-    alignItems: "center",
-    ...theme.shadow.card,
+    borderRadius: 16,
+    backgroundColor: theme.colors.primaryLight,
   },
-  metricValue: { fontSize: 20, fontWeight: "800", color: theme.colors.text900, textAlign: "center" },
-  metricLabel: { fontSize: 12, color: theme.colors.text600, marginTop: 4, textAlign: "center" },
+  detailLabel: { fontSize: 12, color: theme.colors.text600, fontWeight: "800", marginBottom: 6 },
+  detailValue: { fontSize: 14, color: theme.colors.text900, fontWeight: "700" },
 });

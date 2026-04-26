@@ -30,7 +30,7 @@
       [
         "expo-splash-screen",
         {
-        "image": "./assets/images/adflow-wordmark.png",
+        "image": "./assets/images/adflow-icon.png",
         "imageWidth": 260,
         "resizeMode": "contain",
         "backgroundColor": "#ffffff"

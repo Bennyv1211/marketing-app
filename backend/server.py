@@ -1573,26 +1573,6 @@ async def create_post(data: CreatePostIn, user=Depends(get_current_user)):
     }
     await db.posts.insert_one(post_doc.copy())
 
-    # Seed demo metrics only for successful live destinations
-    if publish_status in {"published", "partial_failure"}:
-        import random
-        for platform in (
-            (["facebook"] if fb_post_id else [])
-            + (["instagram"] if ig_post_id else [])
-        ):
-            metric = {
-                "id": str(uuid.uuid4()),
-                "post_id": post_id,
-                "platform": platform,
-                "impressions": random.randint(250, 1200),
-                "reach": random.randint(150, 900),
-                "likes": random.randint(12, 180),
-                "comments": random.randint(0, 30),
-                "clicks": random.randint(2, 45),
-                "fetched_at": now,
-            }
-            await db.post_metrics.insert_one(metric.copy())
-
     await db.job_logs.insert_one({
         "id": str(uuid.uuid4()),
         "job_type": "publish_post",
@@ -1658,34 +1638,15 @@ async def dashboard_summary(user=Depends(get_current_user)):
     posts = await db.posts.find({"user_id": user["id"]}, {"_id": 0}).sort("created_at", -1).to_list(100)
     total_posts = len(posts)
     published_posts = [p for p in posts if p.get("publish_status") == "published"]
-
-    best = None
-    best_reach = -1
     recent_hydrated = None
-    reach_total = 0
-    likes_total = 0
-
-    for p in published_posts:
-        metrics = await db.post_metrics.find({"post_id": p["id"]}, {"_id": 0}).to_list(10)
-        r = sum(int(m.get("reach", 0) or 0) for m in metrics)
-        lk = sum(int(m.get("likes", 0) or 0) for m in metrics)
-        reach_total += r
-        likes_total += lk
-        if r > best_reach:
-            best_reach = r
-            best = p
 
     if posts:
         recent_hydrated = await _hydrate_post(posts[0])
-    best_hydrated = await _hydrate_post(best) if best else None
 
     return {
         "total_posts": total_posts,
         "published_count": len(published_posts),
-        "total_reach": reach_total,
-        "total_likes": likes_total,
         "most_recent": recent_hydrated,
-        "best_performing": best_hydrated,
     }
 
 
