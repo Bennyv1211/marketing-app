@@ -30,10 +30,10 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/adflow-splash-screen.png",
-          "imageWidth": 260,
-          "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+        "image": "./assets/images/adflow-wordmark.png",
+        "imageWidth": 260,
+        "resizeMode": "contain",
+        "backgroundColor": "#ffffff"
         }
       ]
     ],

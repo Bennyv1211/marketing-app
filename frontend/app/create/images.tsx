@@ -30,9 +30,10 @@ export default function ImagesStep() {
   const [loading, setLoading] = useState(generatedImages.length === 0);
   const [stageIdx, setStageIdx] = useState(0);
   const [err, setErr] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!upload || !prompt) {
+    if (!upload) {
       router.replace("/create/upload");
       return;
     }
@@ -58,10 +59,9 @@ export default function ImagesStep() {
         });
         if (cancelled) return;
         const images = res.images as GeneratedImage[];
+        setWarnings((res.warnings as string[]) || []);
         set("generatedImages", images);
-        if (images.length === 1) {
-          set("selectedImage", images[0]);
-        }
+        if (images.length > 0) set("selectedImage", images[0]);
       } catch (e: any) {
         if (!cancelled) setErr(e?.message || "We couldn't generate your ad image. Please try again.");
       } finally {
@@ -82,6 +82,7 @@ export default function ImagesStep() {
     set("selectedImage", null);
     setLoading(true);
     setErr(null);
+    setWarnings([]);
     try {
       const res: any = await api.generateImages({
         uploaded_image_id: upload!.id,
@@ -90,10 +91,9 @@ export default function ImagesStep() {
         post_goal: postGoal,
       });
       const images = res.images as GeneratedImage[];
+      setWarnings((res.warnings as string[]) || []);
       set("generatedImages", images);
-      if (images.length === 1) {
-        set("selectedImage", images[0]);
-      }
+      if (images.length > 0) set("selectedImage", images[0]);
     } catch (e: any) {
       setErr(e?.message || "Couldn't generate. Try again.");
     } finally {
@@ -131,8 +131,8 @@ export default function ImagesStep() {
         <StepHeader
           step={3}
           total={5}
-          title={singleImage ? "Your ad image is ready" : "Pick your favorite"}
-          subtitle={singleImage ? "We generated one ad image for testing." : "Choose the ad image you like best."}
+          title={singleImage ? "Your ad image is ready" : "Choose your ad direction"}
+          subtitle={singleImage ? "We generated one ad image for this request." : "OpenAI makes one image and the premium provider makes another, so you can choose the stronger result."}
         />
 
         {loading ? (
@@ -151,6 +151,13 @@ export default function ImagesStep() {
           </View>
         ) : (
           <>
+            {warnings.length ? (
+              <View style={styles.warningBox}>
+                {warnings.map((warning, idx) => (
+                  <Text key={idx} style={styles.warningText}>{warning}</Text>
+                ))}
+              </View>
+            ) : null}
             {generatedImages.map((img) => {
               const isSel = (selectedImage?.id || generatedImages[0]?.id) === img.id;
               return (
@@ -165,7 +172,15 @@ export default function ImagesStep() {
                   <View style={styles.imgFooter}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.imgStyle}>{img.style_name}</Text>
-                      <Text style={styles.imgHint}>{singleImage ? "Test image" : `Option ${img.variation_index + 1}`}</Text>
+                      <Text style={styles.imgHint}>
+                        {img.provider === "kie"
+                          ? "Premium provider"
+                          : img.provider === "openai"
+                          ? "OpenAI"
+                          : singleImage
+                          ? "Generated image"
+                          : `Option ${img.variation_index + 1}`}
+                      </Text>
                     </View>
                     <View style={[styles.radio, isSel && styles.radioSelected]}>
                       {isSel ? <Ionicons name="checkmark" size={16} color="#fff" /> : null}
@@ -226,6 +241,14 @@ const styles = StyleSheet.create({
   },
   errorTitle: { fontSize: 17, fontWeight: "800", color: theme.colors.text900 },
   errorSub: { fontSize: 13, color: theme.colors.text600, textAlign: "center", marginBottom: 8 },
+  warningBox: {
+    backgroundColor: theme.colors.primaryLight,
+    borderRadius: 18,
+    padding: 14,
+    marginBottom: 12,
+    gap: 6,
+  },
+  warningText: { fontSize: 13, color: theme.colors.text800, lineHeight: 18, fontWeight: "600" },
   imgCard: {
     backgroundColor: "#fff",
     borderRadius: 22,

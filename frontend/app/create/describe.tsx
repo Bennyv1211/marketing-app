@@ -51,7 +51,7 @@ export default function DescribeStep() {
     }
   };
 
-  const canContinue = text.trim().length >= 3 && !!upload;
+  const canContinue = !!upload;
   const limitEnabled = !!usage && usage.limit > 0;
   const limitReached = limitEnabled && usage?.remaining === 0;
 
@@ -69,15 +69,15 @@ export default function DescribeStep() {
           <TouchableOpacity onPress={() => router.back()} style={styles.back} testID="back-btn">
             <Ionicons name="chevron-back" size={22} color={theme.colors.text800} />
           </TouchableOpacity>
-          <StepHeader step={2} total={5} title="Describe the post" subtitle="Tell us the vibe you want. Keep it simple." />
+          <StepHeader step={2} total={5} title="Describe the post" subtitle="Tell us the vibe you want, or leave it blank and AdFlow will build the strongest ad look for you." />
 
-          <Text style={styles.label}>What kind of post do you want to make?</Text>
+          <Text style={styles.label}>What kind of post do you want to make? (Optional)</Text>
           <TextInput
             testID="describe-input"
             value={text}
             onChangeText={setText}
             multiline
-            placeholder="Example: Make this look like a cozy coffee shop ad for a weekend special."
+            placeholder="Optional: Example - Make this feel like a luxury skincare launch ad with clean studio lighting."
             placeholderTextColor={theme.colors.text400}
             style={styles.input}
           />

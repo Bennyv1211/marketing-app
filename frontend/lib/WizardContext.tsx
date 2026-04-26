@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState } from "react";
 
 export type UploadedImage = { id: string; data_uri: string; mime_type: string };
-export type GeneratedImage = { id: string; variation_index: number; style_name: string; data_uri: string };
+export type GeneratedImage = { id: string; variation_index: number; style_name: string; provider?: string; data_uri: string };
 export type GeneratedCaption = {
   id: string;
   style: string;

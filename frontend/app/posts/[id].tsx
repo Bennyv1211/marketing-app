@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -8,6 +8,10 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Share,
+  Alert,
+  Linking,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter, useFocusEffect } from "expo-router";
@@ -60,6 +64,43 @@ export default function PostDetailScreen() {
   if (post?.facebook_enabled) platforms.push("Facebook");
   if (post?.tiktok_enabled) platforms.push("TikTok");
 
+  const manualUploadText = useMemo(() => {
+    if (!post) return "";
+    return [
+      "AdFlow manual upload kit",
+      "",
+      "Caption:",
+      post.caption_text || "-",
+      "",
+      "CTA:",
+      post.caption_cta || "-",
+      "",
+      "Hashtags:",
+      post.caption_hashtags?.join(" ") || "-",
+    ].join("\n");
+  }, [post]);
+
+  const openImage = async () => {
+    if (!post?.image_data_uri) return;
+    try {
+      await Linking.openURL(post.image_data_uri);
+    } catch {
+      Alert.alert("Couldn't open image", "Please try again.");
+    }
+  };
+
+  const shareManualUpload = async () => {
+    if (!post) return;
+    try {
+      await Share.share({
+        message: manualUploadText,
+        url: Platform.OS === "ios" ? post.image_data_uri : undefined,
+      });
+    } catch {
+      Alert.alert("Couldn't share", "Please try again.");
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
       <ScrollView
@@ -81,12 +122,31 @@ export default function PostDetailScreen() {
           <>
             {post.image_data_uri ? <Image source={{ uri: post.image_data_uri }} style={styles.hero} /> : null}
 
+            <View style={styles.actionsCard}>
+              <Text style={styles.title}>Manual upload kit</Text>
+              <Text style={styles.subtle}>
+                Open the image and copy the caption, CTA, and hashtags if you want to post manually.
+              </Text>
+              <View style={styles.actionRow}>
+                <TouchableOpacity style={styles.actionBtn} onPress={openImage} testID="post-open-image">
+                  <Ionicons name="download-outline" size={18} color={theme.colors.primary} />
+                  <Text style={styles.actionText}>Open image</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.actionBtn} onPress={shareManualUpload} testID="post-share-text">
+                  <Ionicons name="share-social-outline" size={18} color={theme.colors.primary} />
+                  <Text style={styles.actionText}>Share text</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
             <View style={styles.card}>
               <Text style={styles.title}>Post details</Text>
               <Text style={styles.subtle}>
                 {platforms.join(", ") || "No platform selected"}
                 {post.publish_status ? ` - ${post.publish_status}` : ""}
               </Text>
+              <Text style={styles.promptLabel}>Caption pack</Text>
+              <Text selectable style={styles.promptText}>{manualUploadText}</Text>
               <Text style={styles.caption}>{post.caption_text || "(no caption)"}</Text>
               {post.caption_cta ? <Text style={styles.cta}>{post.caption_cta}</Text> : null}
               {post.caption_hashtags?.length ? (
@@ -141,6 +201,27 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colors.border,
     marginBottom: 16,
   },
+  actionsCard: {
+    backgroundColor: "#fff",
+    borderRadius: 24,
+    padding: 18,
+    marginBottom: 14,
+    ...theme.shadow.card,
+  },
+  actionRow: { flexDirection: "row", gap: 10, marginTop: 8 },
+  actionBtn: {
+    flex: 1,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: theme.colors.borderStrong,
+    backgroundColor: "#fff",
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 8,
+  },
+  actionText: { color: theme.colors.text800, fontWeight: "700", fontSize: 14 },
   card: {
     backgroundColor: "#fff",
     borderRadius: 24,
@@ -149,6 +230,16 @@ const styles = StyleSheet.create({
   },
   title: { fontSize: 22, fontWeight: "800", color: theme.colors.text900 },
   subtle: { fontSize: 13, color: theme.colors.text600, marginTop: 6, marginBottom: 14 },
+  promptLabel: { fontSize: 12, fontWeight: "800", color: theme.colors.text800, marginBottom: 6 },
+  promptText: {
+    fontSize: 14,
+    color: theme.colors.text900,
+    lineHeight: 21,
+    backgroundColor: theme.colors.primaryLight,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 14,
+  },
   caption: { fontSize: 16, color: theme.colors.text800, lineHeight: 24 },
   cta: { fontSize: 15, color: theme.colors.primary, fontWeight: "800", marginTop: 12 },
   tags: { fontSize: 13, color: theme.colors.secondary, fontWeight: "700", marginTop: 10 },

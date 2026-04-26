@@ -1084,7 +1084,7 @@ async def upload_image(data: UploadIn, user=Depends(get_current_user)):
 
 
 # -------------------- Image generation --------------------
-DAILY_IMAGE_GEN_LIMIT = int(os.environ.get("DAILY_IMAGE_GEN_LIMIT", "0"))
+DAILY_IMAGE_GEN_LIMIT = int(os.environ.get("DAILY_IMAGE_GEN_LIMIT", "10"))
 
 
 def _today_utc_date_str() -> str:
@@ -1105,28 +1105,71 @@ AD_STYLE_VARIATIONS = [
 ]
 
 
-async def _generate_single_ad_image(image_b64: str, mime_type: str, prompt: str, tone: str,
-                                     post_goal: str, variation_text: str, idx: int) -> Optional[dict]:
-    """Call OpenAI image edit and return {data, mime_type} or None."""
+def _default_ad_brief(tone: str, post_goal: str) -> str:
+    tone_map = {
+        "friendly": "approachable and inviting",
+        "playful": "energetic and fun",
+        "bold": "confident and high-impact",
+        "luxury": "premium and aspirational",
+    }
+    goal_map = {
+        "promotion": "highlight an offer and make the product feel irresistible",
+        "new_launch": "make the item feel new, elevated, and worthy of attention",
+        "engagement": "look scroll-stopping and social-first so people want to react",
+        "general_brand_post": "present the product as a flagship brand campaign visual",
+    }
+    tone_phrase = tone_map.get((tone or "").strip().lower(), "premium and inviting")
+    goal_phrase = goal_map.get((post_goal or "").strip().lower(), "present the product as a flagship brand campaign visual")
+    return (
+        f"Create the strongest possible high-clarity ad image for this product. Make it feel {tone_phrase}. "
+        f"The creative goal is to {goal_phrase}. Use premium commercial composition, sharp hero focus, "
+        f"beautiful lighting, refined background design, and a polished campaign-ready finish."
+    )
+
+
+def _compose_ad_generation_prompt(prompt: str, tone: str, post_goal: str, variation_text: str) -> tuple[str, str]:
+    user_prompt = (prompt or "").strip() or _default_ad_brief(tone, post_goal)
+    enhanced_style_direction = (
+        "AdFlow signature campaign direction: make this feel like a premium paid-social ad with crystal-clear hero detail, "
+        "designed lighting, stronger depth, refined set styling, rich contrast, luxurious polish, and tasteful negative space "
+        "that could hold ad copy later."
+    )
     system_msg = (
-        "You are a professional product photographer and ad art director. "
-        "When given a reference product photo, you redesign the scene for a social-media ad "
-        "while keeping the hero product clearly recognizable and undistorted. "
-        "Produce high-quality, realistic, commercial-grade imagery. Do not add text or logos."
+        "You are a world-class product photographer, commercial retoucher, and ad art director. "
+        "When given a reference product photo, create the strongest possible paid-social campaign image. "
+        "The result must feel premium, intentionally designed, and ad-ready, with high clarity, strong subject separation, "
+        "beautiful lighting, and a polished brand look. Keep the hero product clearly recognizable and undistorted. "
+        "Avoid defaulting to an autumn palette, warm fall props, or seasonal harvest scenery unless the user explicitly asks for that mood. "
+        "Do not add text or logos."
     )
     full_prompt = (
         f"Using this uploaded product/subject image as the hero, create a polished marketing ad photo.\n\n"
-        f"USER REQUEST: {prompt}\n"
+        f"USER REQUEST: {user_prompt}\n"
         f"TONE: {tone}\n"
         f"POST GOAL: {post_goal}\n\n"
+        f"{enhanced_style_direction}\n"
         f"{variation_text}\n\n"
+        f"Art direction requirements:\n"
+        f"- Make it look like a premium ad campaign, not a basic product picture\n"
+        f"- Push clarity, texture detail, lighting quality, and visual hierarchy\n"
+        f"- Use a designed environment or studio setup with stronger composition\n"
+        f"- Add depth, contrast, refinement, and campaign-level polish\n"
+        f"- Build scenery that makes sense for the product, for example ingredients around food or bakery items when appropriate\n"
+        f"- Leave tasteful breathing room that could support copy placement later\n\n"
         f"Critical rules:\n"
         f"- The original subject must remain clearly recognizable and un-distorted\n"
         f"- No text, no words, no logos in the image\n"
         f"- Clean composition, the subject is the hero\n"
-        f"- Realistic, high-end commercial quality\n"
+        f"- Realistic, high-end commercial quality with campaign-level finish\n"
         f"- No watermarks"
     )
+    return system_msg, full_prompt
+
+
+async def _generate_single_ad_image(image_b64: str, mime_type: str, prompt: str, tone: str,
+                                     post_goal: str, variation_text: str, idx: int) -> Optional[dict]:
+    """Call OpenAI image edit and return {data, mime_type} or None."""
+    system_msg, full_prompt = _compose_ad_generation_prompt(prompt, tone, post_goal, variation_text)
     try:
         require_config(OPENAI_API_KEY, "OPENAI_API_KEY")
         image_bytes = base64.b64decode(image_b64)
@@ -1158,9 +1201,24 @@ async def _generate_single_ad_image(image_b64: str, mime_type: str, prompt: str,
                     break
         if not image_data:
             raise HTTPException(status_code=502, detail="OpenAI image provider did not return image data.")
-        return {"data": image_data, "mime_type": "image/png"}
+        return {"data": image_data, "mime_type": "image/png", "provider": "openai", "style_name": "OpenAI Campaign Cut"}
     except Exception as e:
         logger.exception(f"Image gen variation {idx} failed: {e}")
+    return None
+
+
+async def _generate_kie_ad_image(image_b64: str, mime_type: str, prompt: str, tone: str,
+                                 post_goal: str, variation_text: str, idx: int) -> Optional[dict]:
+    """Call KIE / Nano Banana and return {data, mime_type} or None."""
+    if not KIE_API_KEY:
+        return None
+    system_msg, full_prompt = _compose_ad_generation_prompt(prompt, tone, post_goal, variation_text)
+    try:
+        task_id = await _create_kie_image_task(f"{system_msg}\n\n{full_prompt}", image_b64, mime_type)
+        image_data, result_mime_type = await _wait_for_kie_image(task_id)
+        return {"data": image_data, "mime_type": result_mime_type, "provider": "kie", "style_name": "Premium Scene Cut"}
+    except Exception as e:
+        logger.exception(f"KIE image gen variation {idx} failed: {e}")
     return None
 
 
@@ -1192,22 +1250,34 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
         }
         await db.generation_requests.insert_one(req_doc.copy())
 
-    variation_count = max(1, min(OPENAI_IMAGE_VARIATIONS, len(AD_STYLE_VARIATIONS)))
-
-    # Generate configured variations in parallel
     tasks = [
         _generate_single_ad_image(
-            upload_b64, upload_mime_type,
-            data.prompt, data.tone or "friendly", data.post_goal or "general brand post",
-            AD_STYLE_VARIATIONS[i], i,
-        )
-        for i in range(variation_count)
+            upload_b64,
+            upload_mime_type,
+            data.prompt,
+            data.tone or "friendly",
+            data.post_goal or "general brand post",
+            "Provider brief: create a clean, premium ad image with strong clarity and a smart product-first scene.",
+            0,
+        ),
+        _generate_kie_ad_image(
+            upload_b64,
+            upload_mime_type,
+            data.prompt,
+            data.tone or "friendly",
+            data.post_goal or "general brand post",
+            "Provider brief: create a richer, more inventive ad scene with stronger environmental storytelling and premium commercial styling.",
+            1,
+        ),
     ]
     results = await asyncio.gather(*tasks, return_exceptions=False)
 
     generated = []
+    provider_warnings = []
     for i, res in enumerate(results):
         if res is None:
+            if i == 1:
+                provider_warnings.append("The premium image provider was unavailable for this request, so only the OpenAI image is shown.")
             continue
         gen_id = str(uuid.uuid4())
         generated_key = f"generated/{user['id']}/{gen_id}.{(mimetypes.guess_extension(res['mime_type']) or '.png').lstrip('.')}"
@@ -1221,7 +1291,8 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
             "storage_key": stored["key"],
             "generation_prompt": data.prompt,
             "variation_index": i,
-            "style_name": ["Signature AdFlow Look"][i],
+            "style_name": res.get("style_name") or f"Option {i + 1}",
+            "provider": res.get("provider", "unknown"),
             "created_at": now_iso(),
             "is_selected": False,
         }
@@ -1230,6 +1301,7 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
             "id": gen_id,
             "variation_index": i,
             "style_name": doc["style_name"],
+            "provider": doc["provider"],
             "data_uri": stored["url"],
         })
 
@@ -1245,6 +1317,7 @@ async def generate_images(data: GenerateImagesIn, user=Depends(get_current_user)
             "limit": DAILY_IMAGE_GEN_LIMIT,
             "remaining": None if DAILY_IMAGE_GEN_LIMIT <= 0 else max(0, DAILY_IMAGE_GEN_LIMIT - (used_today + 1)),
         },
+        "warnings": provider_warnings,
     }
 
 

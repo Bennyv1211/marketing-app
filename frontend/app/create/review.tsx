@@ -1,5 +1,18 @@
-import React, { useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Image, Switch, TouchableOpacity, Modal } from "react-native";
+import React, { useMemo, useState } from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Image,
+  Switch,
+  TouchableOpacity,
+  Modal,
+  Share,
+  Alert,
+  Linking,
+  Platform,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -12,10 +25,32 @@ import { useWizard } from "../../lib/WizardContext";
 export default function ReviewStep() {
   const router = useRouter();
   const {
-    selectedImage, selectedCaption, instagramEnabled, facebookEnabled, tiktokEnabled, set, reset,
+    selectedImage,
+    selectedCaption,
+    instagramEnabled,
+    facebookEnabled,
+    tiktokEnabled,
+    set,
+    reset,
   } = useWizard();
   const [publishing, setPublishing] = useState(false);
   const [result, setResult] = useState<null | { ok: boolean; message: string; warnings: string[] }>(null);
+
+  const manualUploadText = useMemo(() => {
+    if (!selectedCaption) return "";
+    return [
+      "AdFlow manual upload kit",
+      "",
+      "Caption:",
+      selectedCaption.caption || "-",
+      "",
+      "CTA:",
+      selectedCaption.cta || "-",
+      "",
+      "Hashtags:",
+      selectedCaption.hashtags?.join(" ") || "-",
+    ].join("\n");
+  }, [selectedCaption]);
 
   if (!selectedImage || !selectedCaption) {
     return (
@@ -23,7 +58,13 @@ export default function ReviewStep() {
         <View style={{ padding: 20 }}>
           <Text style={{ color: theme.colors.text800 }}>Something is missing. Please start again.</Text>
           <View style={{ height: 12 }} />
-          <Button label="Back to dashboard" onPress={() => { reset(); router.replace("/dashboard"); }} />
+          <Button
+            label="Back to dashboard"
+            onPress={() => {
+              reset();
+              router.replace("/dashboard");
+            }}
+          />
         </View>
       </SafeAreaView>
     );
@@ -57,6 +98,25 @@ export default function ReviewStep() {
     }
   };
 
+  const openImage = async () => {
+    try {
+      await Linking.openURL(selectedImage.data_uri);
+    } catch {
+      Alert.alert("Couldn't open image", "Please try again.");
+    }
+  };
+
+  const shareManualUpload = async () => {
+    try {
+      await Share.share({
+        message: manualUploadText,
+        url: Platform.OS === "ios" ? selectedImage.data_uri : undefined,
+      });
+    } catch {
+      Alert.alert("Couldn't share", "Please try again.");
+    }
+  };
+
   const goHome = () => {
     reset();
     router.replace("/dashboard");
@@ -78,6 +138,21 @@ export default function ReviewStep() {
             {selectedCaption.hashtags?.length ? (
               <Text style={styles.previewTags}>{selectedCaption.hashtags.join(" ")}</Text>
             ) : null}
+          </View>
+        </View>
+
+        <View style={styles.manualCard}>
+          <Text style={styles.sectionTitle}>Manual upload kit</Text>
+          <Text style={styles.manualSub}>
+            If you want to post this yourself, open the image and copy the caption, CTA, and hashtags.
+          </Text>
+          <View style={styles.actionRow}>
+            <Button label="Open image" variant="secondary" onPress={openImage} testID="manual-open-image" style={{ flex: 1 }} />
+            <Button label="Share text" variant="secondary" onPress={shareManualUpload} testID="manual-share-text" style={{ flex: 1 }} />
+          </View>
+          <View style={styles.promptBox}>
+            <Text style={styles.promptLabel}>Caption pack</Text>
+            <Text selectable style={styles.promptText}>{manualUploadText}</Text>
           </View>
         </View>
 
@@ -135,7 +210,7 @@ export default function ReviewStep() {
             {result?.warnings?.length ? (
               <View style={styles.warnBox}>
                 {result.warnings.map((w, i) => (
-                  <Text key={i} style={styles.warnText}>• {w}</Text>
+                  <Text key={i} style={styles.warnText}>- {w}</Text>
                 ))}
               </View>
             ) : null}
@@ -170,7 +245,7 @@ function ToggleRow({ title, subtitle, icon, color, value, onChange, testID }: an
         value={value}
         onValueChange={onChange}
         trackColor={{ false: theme.colors.border, true: theme.colors.primary }}
-        thumbColor={"#fff"}
+        thumbColor="#fff"
         testID={testID}
       />
     </View>
@@ -193,6 +268,23 @@ const styles = StyleSheet.create({
   previewCta: { fontSize: 14, color: theme.colors.primary, fontWeight: "800", marginTop: 10 },
   previewTags: { fontSize: 13, color: theme.colors.secondary, marginTop: 8, fontWeight: "600" },
   sectionTitle: { fontSize: 16, fontWeight: "800", color: theme.colors.text900, marginTop: 22, marginBottom: 10 },
+  manualCard: {
+    backgroundColor: "#fff",
+    borderRadius: 24,
+    padding: 18,
+    marginTop: 16,
+    ...theme.shadow.card,
+  },
+  manualSub: { fontSize: 13, color: theme.colors.text600, lineHeight: 20 },
+  actionRow: { flexDirection: "row", gap: 10, marginTop: 14 },
+  promptBox: {
+    marginTop: 14,
+    borderRadius: 16,
+    padding: 14,
+    backgroundColor: theme.colors.primaryLight,
+  },
+  promptLabel: { fontSize: 12, fontWeight: "800", color: theme.colors.text800, marginBottom: 6 },
+  promptText: { fontSize: 14, color: theme.colors.text900, lineHeight: 21 },
   toggleRow: {
     flexDirection: "row", alignItems: "center", backgroundColor: "#fff", borderRadius: 20,
     padding: 14, marginBottom: 10, ...theme.shadow.card,

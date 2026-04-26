@@ -1,19 +1,19 @@
 export const theme = {
   colors: {
-    bg: "#FDFBF7",
+    bg: "#FBFAF7",
     card: "#FFFFFF",
-    primary: "#E07A5F",
-    primaryHover: "#D56A4F",
-    primaryLight: "#F9EAE6",
+    primary: "#F9633E",
+    primaryHover: "#E45633",
+    primaryLight: "#FFF0EB",
     primaryFg: "#FFFFFF",
-    secondary: "#81B29A",
-    accent: "#F2CC8F",
-    text900: "#1C1C1C",
-    text800: "#2D3748",
-    text600: "#4A5568",
-    text400: "#CBD5E0",
-    border: "#EDF2F7",
-    borderStrong: "#E2E8F0",
+    secondary: "#1DB954",
+    accent: "#FFD166",
+    text900: "#18181B",
+    text800: "#27272A",
+    text600: "#52525B",
+    text400: "#D4D4D8",
+    border: "#F1F1F3",
+    borderStrong: "#E4E4E7",
     danger: "#C0392B",
     success: "#2F8F5A",
   },
@@ -63,11 +63,11 @@ export const BUSINESS_TYPES = [
 
 export const TONES = [
   { key: "friendly", label: "Friendly" },
-  { key: "sales", label: "Sales" },
+  { key: "bold", label: "Bold" },
   { key: "premium", label: "Premium" },
-  { key: "casual", label: "Casual" },
+  { key: "playful", label: "Playful" },
   { key: "professional", label: "Professional" },
-  { key: "exciting", label: "Exciting" },
+  { key: "luxury", label: "Luxury" },
 ];
 
 export const POST_GOALS = [
@@ -78,10 +78,14 @@ export const POST_GOALS = [
 ];
 
 export const QUICK_SUGGESTIONS = [
-  "Cozy and warm",
-  "Weekend sale",
-  "Premium product",
-  "Fresh and modern",
-  "New arrival",
-  "Seasonal special",
+  "Luxury studio lighting",
+  "Bold product spotlight",
+  "Fresh ingredient scene",
+  "Clean bakery counter ad",
+  "Modern cafe campaign",
+  "Colorful summer energy",
+  "Premium launch moment",
+  "High-contrast hero shot",
+  "Minimal editorial styling",
+  "Rich texture close-up",
 ];

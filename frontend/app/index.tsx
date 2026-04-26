@@ -24,7 +24,7 @@ export default function Landing() {
       <ScrollView contentContainerStyle={styles.scroll}>
         <View style={styles.hero}>
           <Image
-            source={require("../assets/images/adflow-splash-screen.png")}
+            source={require("../assets/images/adflow-wordmark.png")}
             style={styles.heroImage}
           />
         </View>
@@ -34,7 +34,7 @@ export default function Landing() {
             Turn any photo into{"\n"}a ready-to-post ad.
           </Text>
           <Text style={styles.subtitle}>
-            Snap a photo of your product. Tell us the vibe. We'll design a beautiful post and caption for you in seconds.
+            Snap a photo of your product. Tell us the vibe. We'll build polished ad visuals, caption packs, and ready-to-post social creative in seconds.
           </Text>
 
           <View style={styles.featureRow}>
